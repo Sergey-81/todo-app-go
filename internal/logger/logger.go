@@ -11,3 +11,7 @@ func Error(err error) {
         log.Printf("[ERROR] %v", err)
     }
 }
+
+func Debug(msg string) {
+    log.Printf("[DEBUG] %s", msg)
+}

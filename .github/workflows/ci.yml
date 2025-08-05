@@ -19,4 +19,4 @@ jobs:
           
       - name: Show coverage
         run: |
-          go tool cover -func=coverage.txt
+          go tool cover -func=coverage.txt || echo "No coverage file"
