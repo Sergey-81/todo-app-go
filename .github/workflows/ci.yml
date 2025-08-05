@@ -11,22 +11,12 @@ jobs:
         uses: actions/setup-go@v4
         with:
           go-version: '1.24.4'
-          cache: true  # Включаем кеширование модулей
           
-      - name: Cache Go modules
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~\go\bin
-            ~\go\pkg\mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-            
       - name: Run tests
         run: |
           go mod tidy
-          go test -v -coverprofile=coverage.out ./...
+          go test -v -coverprofile=coverage.txt ./...
           
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
+      - name: Show coverage
+        run: |
+          go tool cover -func=coverage.txt

@@ -7,5 +7,7 @@ func Info(msg string) {
 }
 
 func Error(err error) {
-    log.Printf("[ERROR] %v", err)
+    if err != nil {
+        log.Printf("[ERROR] %v", err)
+    }
 }
