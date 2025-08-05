@@ -7,7 +7,7 @@ func Info(msg string) {
 }
 
 func Error(err error) {
-    if err != nil {
+    if err != nil { // Добавьте эту проверку
         log.Printf("[ERROR] %v", err)
     }
 }

@@ -17,3 +17,10 @@ func TestDebug(t *testing.T) {
         Debug("Тестовое debug-сообщение")
     })
 }
+
+func TestError(t *testing.T) {
+    t.Run("With real error", func(t *testing.T) {
+        err := errors.New("test error")
+        Error(err) // Должно логировать ошибку
+    })
+}
