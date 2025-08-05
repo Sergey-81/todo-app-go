@@ -48,3 +48,16 @@ todo-app/
   - Автоинкремент ID
 - Добавлены табличные тесты (92% coverage)
 - Обновлена документация методов
+
+## 05-08-2025 19:06
+### Реализованы метрики:
+todoapp_tasks_added_total (counter) - подсчет операций добавления
+todoapp_task_desc_length_bytes (histogram) - распределение длин описаний
+todoapp_add_task_duration_seconds (histogram) - время выполнения
+Тестирование:
+Написаны unit-тесты с 100% покрытием
+Подтверждена работа в CI (зеленый маркер в GitHub)
+## Мониторинг
+Метрики доступны на порту 2112:
+```bash
+curl http://localhost:2112/metrics

@@ -1,10 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	//"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -16,23 +21,42 @@ func main() {
 	tm := &manager.TaskManager{}
 
 	// Запуск HTTP-сервера для метрик Prometheus
-	startMetricsServer()
+	srv := startMetricsServer()
 
 	// Демонстрация работы
 	demoOperations(tm)
 
-	// Бесконечный цикл для работы сервера метрик
-	select {}
+	// Ожидание сигнала завершения
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	// Graceful shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server shutdown failed: %v", err)
+	}
+	log.Println("Server gracefully stopped")
 }
 
-func startMetricsServer() {
-	http.Handle("/metrics", promhttp.Handler())
+func startMetricsServer() *http.Server {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+
+	srv := &http.Server{
+		Addr:    ":2112",
+		Handler: mux,
+	}
+
 	go func() {
-		if err := http.ListenAndServe(":2112", nil); err != nil {
-			log.Fatalf("Failed to start metrics server: %v", err)
+		log.Println("Starting metrics server on :2112")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Metrics server failed: %v", err)
 		}
 	}()
-	log.Println("Metrics server started at :2112")
+
+	return srv
 }
 
 func demoOperations(tm *manager.TaskManager) {
