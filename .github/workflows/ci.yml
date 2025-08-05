@@ -18,6 +18,8 @@ jobs:
         run: |
           set -e
           go mod tidy
+          go vet ./...
+            staticcheck ./...
           
           # Тестируем все пакеты кроме cmd
           for pkg in $(go list ./... | grep -v "/cmd/"); do

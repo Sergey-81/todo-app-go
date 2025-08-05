@@ -1,15 +1,19 @@
 package logger
 
-import "testing"
+import (
+	"errors" // Добавлен недостающий импорт
+	"testing"
+)
 
 func TestLogger(t *testing.T) {
-    t.Run("Info", func(t *testing.T) {
-        Info("Тестовое сообщение")
-    })
+	t.Run("Info", func(t *testing.T) {
+		Info("Тестовое сообщение")
+	})
 
-    t.Run("Error", func(t *testing.T) {
-        Error(nil)
-    })
+	t.Run("Error", func(t *testing.T) {
+		err := errors.New("тестовая ошибка") // Теперь errors доступен
+		Error(err)
+	})
 }
 
 func TestDebug(t *testing.T) {
