@@ -15,8 +15,16 @@ jobs:
       - name: Run tests
         run: |
           go mod tidy
-          go test -v -coverprofile=coverage.txt ./...
+          for pkg in $(go list ./... | grep -v "/cmd/"); do
+            go test -v -coverprofile=$pkg/coverage.out $pkg
+          done
           
-      - name: Show coverage
+      - name: Merge coverage
         run: |
-          go tool cover -func=coverage.txt || echo "No coverage file"
+          echo "mode: set" > full-coverage.out
+          find . -name "coverage.out" | while read file; do
+            if [ -f "$file" ]; then
+              grep -h -v "mode: set" "$file" >> full-coverage.out
+            fi
+          done
+          go tool cover -func=full-coverage.out

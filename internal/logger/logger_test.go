@@ -11,3 +11,9 @@ func TestLogger(t *testing.T) {
         Error(nil)
     })
 }
+
+func TestDebug(t *testing.T) {
+    t.Run("Debug", func(t *testing.T) {
+        Debug("Тестовое debug-сообщение")
+    })
+}
