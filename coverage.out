@@ -1,6 +1,8 @@
 mode: set
-todo-app/internal/manager/task_manager.go:22.65,23.23 1 1
-todo-app/internal/manager/task_manager.go:23.23,25.3 1 1
-todo-app/internal/manager/task_manager.go:27.5,27.32 1 1
-todo-app/internal/manager/task_manager.go:27.32,29.6 1 1
-todo-app/internal/manager/task_manager.go:31.2,43.21 6 1
+todo-app/internal/manager/task_manager.go:52.65,54.15 2 1
+todo-app/internal/manager/task_manager.go:54.15,57.3 2 1
+todo-app/internal/manager/task_manager.go:59.2,59.23 1 1
+todo-app/internal/manager/task_manager.go:59.23,62.3 2 1
+todo-app/internal/manager/task_manager.go:64.2,64.29 1 1
+todo-app/internal/manager/task_manager.go:64.29,67.3 2 1
+todo-app/internal/manager/task_manager.go:69.2,85.21 8 1
