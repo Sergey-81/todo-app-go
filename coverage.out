@@ -1,5 +1,6 @@
 mode: set
-todo-app/internal/logger/logger.go:5.23,7.2 1 1
-todo-app/internal/logger/logger.go:9.23,10.19 1 1
-todo-app/internal/logger/logger.go:10.19,12.6 1 1
-todo-app/internal/logger/logger.go:15.24,17.2 1 1
+todo-app/internal/manager/task_manager.go:22.65,23.23 1 1
+todo-app/internal/manager/task_manager.go:23.23,25.3 1 1
+todo-app/internal/manager/task_manager.go:27.5,27.32 1 1
+todo-app/internal/manager/task_manager.go:27.32,29.6 1 1
+todo-app/internal/manager/task_manager.go:31.2,43.21 6 1
