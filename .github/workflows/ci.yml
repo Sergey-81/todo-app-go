@@ -1,0 +1,14 @@
+name: CI
+on: [push]
+
+jobs:
+  test:
+    runs-on: windows-latest  # Изменил на Windows для совместимости
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.4'  # Точная версия
+          architecture: 'x64'    # Явно указываем amd64
+      - run: go test -v ./...
+      - run: go version  # Для логов (проверка версии)
