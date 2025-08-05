@@ -13,18 +13,17 @@ jobs:
           go-version: '1.24.4'
           
       - name: Run tests
+        shell: bash
         run: |
           go mod tidy
           for pkg in $(go list ./... | grep -v "/cmd/"); do
-            go test -v -coverprofile=$pkg/coverage.out $pkg
+            mkdir -p "${pkg}/coverage"
+            go test -v -coverprofile="${pkg}/coverage.out" "$pkg"
           done
           
       - name: Merge coverage
+        shell: bash
         run: |
           echo "mode: set" > full-coverage.out
-          find . -name "coverage.out" | while read file; do
-            if [ -f "$file" ]; then
-              grep -h -v "mode: set" "$file" >> full-coverage.out
-            fi
-          done
+          find . -name "coverage.out" -exec grep -h -v "^mode:" {} >> full-coverage.out \;
           go tool cover -func=full-coverage.out
