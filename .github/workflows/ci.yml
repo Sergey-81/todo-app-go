@@ -27,10 +27,12 @@ jobs:
           # Проверка стиля и статического анализа
           echo "Running vet..."
           go vet ./...
+          echo "Running golint..."
+          ~/go/bin/golint -set_exit_status ./...
           echo "Running staticcheck..."
           ~/go/bin/staticcheck ./...
           
-          # Запуск тестов
+          # Запуск тестов (остальное без изменений)
           echo "Running tests..."
           for pkg in $(go list ./... | grep -v "/cmd/"); do
             mkdir -p "${pkg#*/}/coverage"
