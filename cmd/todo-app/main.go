@@ -81,23 +81,33 @@ func (tm *TaskManager) AddTask(desc string) (int, error) {
 }
 
 func addTaskHandler(tm *TaskManager) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Description string `json:"description"`
-		}
+    return func(w http.ResponseWriter, r *http.Request) {
+        var req struct {
+            Description string `json:"description"`
+        }
 
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-		defer r.Body.Close()
+        if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+            w.WriteHeader(http.StatusBadRequest)
+            json.NewEncoder(w).Encode(map[string]string{"error": "invalid request"})
+            return
+        }
+        defer r.Body.Close()
 
-		if _, err := tm.AddTask(req.Description); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusCreated)
-	}
+        id, err := tm.AddTask(req.Description)
+        if err != nil {
+            w.WriteHeader(http.StatusInternalServerError)
+            json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+            return
+        }
+
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusCreated)
+        json.NewEncoder(w).Encode(map[string]interface{}{
+            "id":          id,
+            "description": req.Description,
+            "status":      "created",
+        })
+    }
 }
 
 func main() {

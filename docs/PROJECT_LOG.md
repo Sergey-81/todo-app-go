@@ -61,3 +61,15 @@ todoapp_add_task_duration_seconds (histogram) - время выполнения
 Метрики доступны на порту 2112:
 ```bash
 curl http://localhost:2112/metrics
+
+## 06-08-2025 21:31
+### Реализация HTTP API для AddTask
+
+**Добавлено:**
+- Роутер на базе `chi` (v5)
+- Обработчик POST-запросов `/tasks`
+- JSON-сериализация запросов/ответов:
+  ```go
+  type CreateTaskRequest struct {
+      Description string `json:"description"`
+  }
