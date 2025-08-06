@@ -73,3 +73,22 @@ curl http://localhost:2112/metrics
   type CreateTaskRequest struct {
       Description string `json:"description"`
   }
+новая структура проекта:
+  todo-app/
+├── .github/
+│   └── workflows/
+│       └── ci.yml
+├── cmd/
+│   └── todo-app/
+│       └── main.go          # Точка входа (инициализация сервера)
+├── internal/
+│   ├── manager/
+│   │   ├── task_manager.go  # Логика добавления задач
+│   │   └── task_manager_test.go
+│   ├── models/
+│   │   └── task.go          # Модель Task + CreateTaskRequest
+│   ├── logger/
+│   │   └── logger.go        # Логирование
+│   └── server/
+│       └── server.go        # Роутер и обработчик API (единственный новый файл!)
+└── go.mod
