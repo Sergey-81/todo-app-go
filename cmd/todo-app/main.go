@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,26 +13,24 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // TaskManager с метриками Prometheus
 type TaskManager struct {
-	mu    sync.Mutex
-	tasks map[int]string
-	nextID int
-
-	// Метрики Prometheus
-	tasksAdded      prometheus.Counter
-	taskDuration    prometheus.Histogram
-	taskDescLength  prometheus.Histogram
+	mu            sync.Mutex
+	tasks         map[int]string
+	nextID        int
+	tasksAdded    prometheus.Counter
+	taskDuration  prometheus.Histogram
+	taskDescLength prometheus.Histogram
 }
 
-// NewTaskManager создает менеджер задач с инициализированными метриками
 func NewTaskManager() *TaskManager {
 	tm := &TaskManager{
-		tasks: make(map[int]string),
+		tasks:  make(map[int]string),
 		nextID: 1,
 		tasksAdded: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "todoapp_tasks_added_total",
@@ -49,7 +48,6 @@ func NewTaskManager() *TaskManager {
 		}),
 	}
 
-	// Регистрация метрик
 	prometheus.MustRegister(tm.tasksAdded)
 	prometheus.MustRegister(tm.taskDuration)
 	prometheus.MustRegister(tm.taskDescLength)
@@ -66,7 +64,6 @@ func (tm *TaskManager) AddTask(desc string) (int, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	// Валидация
 	if desc == "" {
 		return 0, fmt.Errorf("описание задачи обязательно")
 	}
@@ -74,93 +71,98 @@ func (tm *TaskManager) AddTask(desc string) (int, error) {
 		return 0, fmt.Errorf("описание не может превышать 1000 символов")
 	}
 
-	// Логика добавления
 	id := tm.nextID
 	tm.tasks[id] = desc
 	tm.nextID++
 
-	// Обновление метрик
 	tm.tasksAdded.Inc()
 	tm.taskDescLength.Observe(float64(len(desc)))
-
 	return id, nil
 }
 
+func addTaskHandler(tm *TaskManager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Description string `json:"description"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
+
+		if _, err := tm.AddTask(req.Description); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	}
+}
+
 func main() {
-    // 1. Инициализация менеджера задач с метриками
-    tm := NewTaskManager()
+	tm := NewTaskManager()
+	r := chi.NewRouter()
 
-    // 2. Настройка HTTP-сервера для метрик
-    reg := prometheus.NewRegistry()
-    reg.MustRegister(tm.tasksAdded, tm.taskDuration, tm.taskDescLength)
+	r.Post("/tasks", addTaskHandler(tm))
+	r.Handle("/metrics", promhttp.Handler())
 
-    mux := http.NewServeMux()
-    mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	srv := &http.Server{
+		Addr:    ":2112",
+		Handler: r,
+	}
 
-    srv := &http.Server{
-        Addr:    ":2112",
-        Handler: mux,
-    }
+	go func() {
+		log.Println("Server started on :2112")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+	}()
 
-    // 3. Запуск сервера в отдельной goroutine
-    go func() {
-        log.Println("Starting metrics server on :2112")
-        if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-            log.Fatalf("Metrics server failed: %v", err)
-        }
-    }()
+	go demoOperations(tm)
 
-    // 4. Даем серверу время на запуск
-    time.Sleep(500 * time.Millisecond)
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
 
-    // 5. Демонстрационные операции
-    demoOperations(tm)
-
-    // 6. Graceful shutdown
-    quit := make(chan os.Signal, 1)
-    signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-    <-quit
-
-    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer cancel()
-    if err := srv.Shutdown(ctx); err != nil {
-        log.Fatalf("Server shutdown failed: %v", err)
-    }
-    log.Println("Server gracefully stopped")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	srv.Shutdown(ctx)
+	log.Println("Server stopped")
 }
 
 func demoOperations(tm *TaskManager) {
-    // Тест 1: Успешное добавление задачи
-    id, err := tm.AddTask("Купить молоко")  // Первое использование := (объявление)
-    if err != nil {
-        log.Printf("❌ Ошибка добавления: %v", err)
-    } else {
-        log.Printf("✅ Добавлена задача ID: %d", id)
-    }
+	// Тест 1: Успешное добавление задачи
+	id, err := tm.AddTask("Купить молоко")
+	if err != nil {
+		log.Printf("❌ Ошибка добавления: %v", err)
+	} else {
+		log.Printf("✅ Добавлена задача ID: %d", id)
+	}
 
-    // Тест 2: Пустое описание - используем = вместо :=
-    _, err = tm.AddTask("")  // Присваивание существующей err
-    if err != nil {
-        log.Printf("✅ Валидация пустого описания работает: %v", err)
-    }
+	// Тест 2: Пустое описание
+	_, err = tm.AddTask("")
+	if err != nil {
+		log.Printf("✅ Валидация пустого описания работает: %v", err)
+	}
 
-    // Тест 3: Длинное описание - также используем =
-    longDesc := strings.Repeat("a", 1001)
-    _, err = tm.AddTask(longDesc)  // Присваивание существующей err
-    if err != nil {
-        log.Printf("✅ Валидация длины описания работает: %v", err)
-    }
+	// Тест 3: Длинное описание
+	longDesc := strings.Repeat("a", 1001)
+	_, err = tm.AddTask(longDesc)
+	if err != nil {
+		log.Printf("✅ Валидация длины описания работает: %v", err)
+	}
 
-    // Тест 4: Множественные задачи
-    for i := 0; i < 5; i++ {
-        start := time.Now()
-        taskID, taskErr := tm.AddTask(fmt.Sprintf("Задача %d", i+1))  // Новые переменные
-        duration := time.Since(start)
-        
-        if taskErr != nil {
-            log.Printf("⚠️ Ошибка при добавлении задачи %d: %v", i+1, taskErr)
-        } else {
-            log.Printf("➕ Добавлена задача %d (время: %v)", taskID, duration)
-        }
-    }
+	// Тест 4: Множественные задачи
+	for i := 0; i < 5; i++ {
+		start := time.Now()
+		taskID, taskErr := tm.AddTask(fmt.Sprintf("Задача %d", i+1))
+		duration := time.Since(start)
+		
+		if taskErr != nil {
+			log.Printf("⚠️ Ошибка при добавлении задачи %d: %v", i+1, taskErr)
+		} else {
+			log.Printf("➕ Добавлена задача %d (время: %v)", taskID, duration)
+		}
+	}
 }
