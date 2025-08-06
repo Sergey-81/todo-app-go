@@ -91,4 +91,10 @@ curl http://localhost:2112/metrics
 │   │   └── logger.go        # Логирование
 │   └── server/
 │       └── server.go        # Роутер и обработчик API (единственный новый файл!)
-└── go.mod
+│── go.mod
+│── go.sum
+└── Dockerfile
+## 07-08-2025 01:35
+### Реализован Docker:
+создан Dockerfile
+успешно "упаковал" своё Go-приложение в Docker-контейнер

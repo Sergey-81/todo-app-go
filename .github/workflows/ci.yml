@@ -1,4 +1,5 @@
 name: CI
+
 on: [push]
 
 jobs:
@@ -32,7 +33,7 @@ jobs:
           echo "Running staticcheck..."
           ~/go/bin/staticcheck ./...
           
-          # Запуск тестов (остальное без изменений)
+          # Запуск тестов
           echo "Running tests..."
           for pkg in $(go list ./... | grep -v "/cmd/"); do
             mkdir -p "${pkg#*/}/coverage"
@@ -57,4 +58,24 @@ jobs:
         with:
           name: coverage-report
           path: full-coverage.out
+
+  # Новый шаг для DockerHub (работает только если тесты прошли)
+  docker-build-push:
+    needs: test  # Зависит от успеха тестов
+    runs-on: ubuntu-latest  # Сборка Docker требует Linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/todo-app-go:latest
 
