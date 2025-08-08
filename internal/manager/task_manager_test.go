@@ -2,14 +2,16 @@ package manager
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestAddTask(t *testing.T) {
-	tm := &TaskManager{}
+	tm := NewTaskManager()
 
 	t.Run("Успешное добавление", func(t *testing.T) {
 		id, err := tm.AddTask("Купить молоко")
@@ -44,7 +46,7 @@ func TestAddTask(t *testing.T) {
 }
 
 func TestUpdateTask(t *testing.T) {
-	tm := &TaskManager{}
+	tm := NewTaskManager()
 	id, _ := tm.AddTask("Исходная задача")
 
 	t.Run("Обновление описания", func(t *testing.T) {
@@ -75,7 +77,7 @@ func TestUpdateTask(t *testing.T) {
 }
 
 func TestUpdateTask_EdgeCases(t *testing.T) {
-	tm := &TaskManager{}
+	tm := NewTaskManager()
 	id, _ := tm.AddTask("Тестовая задача")
 
 	t.Run("Обновление только статуса", func(t *testing.T) {
@@ -99,7 +101,7 @@ func TestUpdateTask_EdgeCases(t *testing.T) {
 }
 
 func TestGetTask(t *testing.T) {
-	tm := &TaskManager{}
+	tm := NewTaskManager()
 	id, _ := tm.AddTask("Тестовая задача")
 
 	t.Run("Существующая задача", func(t *testing.T) {
@@ -120,45 +122,95 @@ func TestGetTask(t *testing.T) {
 	})
 }
 
-func TestMetrics(t *testing.T) {
-	t.Run("Метрики AddTask", func(t *testing.T) {
-		registry := prometheus.NewRegistry()
-		testCounter := prometheus.NewCounterVec(
-			prometheus.CounterOpts{Name: "test_counter"}, []string{"status"})
-		registry.MustRegister(testCounter)
-		
-		original := addTaskCount
-		addTaskCount = testCounter
-		defer func() { addTaskCount = original }()
+func TestConcurrentAccess(t *testing.T) {
+	tm := NewTaskManager()
+	var wg sync.WaitGroup
+	iterations := 100
 
-		tm := &TaskManager{}
-		tm.AddTask("Тест метрик")
-		
-		if val := testutil.ToFloat64(testCounter.WithLabelValues("success")); val != 1 {
-			t.Errorf("Ожидалось 1, получено %v", val)
-		}
-	})
+	wg.Add(iterations)
+	for i := 0; i < iterations; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = tm.AddTask("Конкурентная задача")
+		}()
+	}
+	wg.Wait()
 
-	t.Run("Метрики UpdateTask", func(t *testing.T) {
-		registry := prometheus.NewRegistry()
-		testCounter := prometheus.NewCounterVec(
-			prometheus.CounterOpts{Name: "test_counter"}, []string{"status"})
-		registry.MustRegister(testCounter)
-		
-		original := updateTaskCount
-		updateTaskCount = testCounter
-		defer func() { updateTaskCount = original }()
-
-		tm := &TaskManager{}
-		id, _ := tm.AddTask("Тест метрик")
-		tm.UpdateTask(id, UpdateTaskRequest{Completed: ptr(true)})
-		
-		if val := testutil.ToFloat64(testCounter.WithLabelValues("success")); val != 1 {
-			t.Errorf("Ожидалось 1, получено %v", val)
-		}
-	})
+	// Проверка через GetTask
+	if _, err := tm.GetTask(iterations); err != nil {
+		t.Errorf("Не все задачи были добавлены, последняя ошибка: %v", err)
+	}
 }
 
-func ptr[T any](v T) *T {
-    return &v
+func TestMetrics(t *testing.T) {
+	// Тест метрик AddTask
+	t.Run("Метрики AddTask", func(t *testing.T) {
+		// Сохраняем оригинальные метрики
+		origAddCount := addTaskCount
+		origAddDuration := addTaskDuration
+		origDescLength := taskDescLength
+		defer func() {
+			addTaskCount = origAddCount
+			addTaskDuration = origAddDuration
+			taskDescLength = origDescLength
+		}()
+
+		// Создаем тестовый регистратор
+		registry := prometheus.NewRegistry()
+
+		// Создаем тестовые метрики
+		testAddCounter := promauto.With(registry).NewCounterVec(
+			prometheus.CounterOpts{Name: "test_add_counter"}, []string{"status"})
+		testAddDuration := promauto.With(registry).NewHistogram(
+			prometheus.HistogramOpts{Name: "test_add_duration"})
+		testDescLength := promauto.With(registry).NewHistogram(
+			prometheus.HistogramOpts{Name: "test_desc_length"})
+
+		// Подменяем метрики
+		addTaskCount = testAddCounter
+		addTaskDuration = testAddDuration
+		taskDescLength = testDescLength
+
+		tm := NewTaskManager()
+		tm.AddTask("Тест метрик")
+
+		// Проверяем счетчик
+		if val := testutil.ToFloat64(testAddCounter.WithLabelValues("success")); val != 1 {
+			t.Errorf("Ожидалось 1 успешное добавление, получено %v", val)
+		}
+	})
+
+	// Тест метрик UpdateTask
+	t.Run("Метрики UpdateTask", func(t *testing.T) {
+		// Сохраняем оригинальные метрики
+		origUpdateCount := updateTaskCount
+		origUpdateDuration := updateTaskDuration
+		defer func() {
+			updateTaskCount = origUpdateCount
+			updateTaskDuration = origUpdateDuration
+		}()
+
+		// Создаем тестовый регистратор
+		registry := prometheus.NewRegistry()
+
+		// Создаем тестовые метрики
+		testUpdateCounter := promauto.With(registry).NewCounterVec(
+			prometheus.CounterOpts{Name: "test_update_counter"}, []string{"status"})
+		testUpdateDuration := promauto.With(registry).NewHistogram(
+			prometheus.HistogramOpts{Name: "test_update_duration"})
+
+		// Подменяем метрики
+		updateTaskCount = testUpdateCounter
+		updateTaskDuration = testUpdateDuration
+
+		tm := NewTaskManager()
+		id, _ := tm.AddTask("Тест метрик")
+		completed := true
+		tm.UpdateTask(id, UpdateTaskRequest{Completed: &completed})
+
+		// Проверяем счетчик
+		if val := testutil.ToFloat64(testUpdateCounter.WithLabelValues("success")); val != 1 {
+			t.Errorf("Ожидалось 1 успешное обновление, получено %v", val)
+		}
+	})
 }

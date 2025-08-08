@@ -1,17 +1,48 @@
 package logger
 
-import "log"
+import (
+	"context"
+	"log"
+	//"os"
+)
 
-func Info(msg string) {
-    log.Printf("[INFO] %s", msg)
+// Уровни логирования
+const (
+	LevelDebug = iota
+	LevelInfo
+	LevelError
+)
+
+var (
+	logLevel = LevelInfo
+)
+
+// SetLevel устанавливает уровень логирования
+func SetLevel(level int) {
+	logLevel = level
 }
 
-func Error(err error) {
-    if err != nil { // Добавьте эту проверку
-        log.Printf("[ERROR] %v", err)
-    }
+// Debug логирует отладочные сообщения
+func Debug(ctx context.Context, msg string, args ...interface{}) {
+	if logLevel <= LevelDebug {
+		log.Printf("[DEBUG] "+msg, args...)
+	}
 }
 
-func Debug(msg string) {
-    log.Printf("[DEBUG] %s", msg)
+// Info логирует информационные сообщения
+func Info(ctx context.Context, msg string, args ...interface{}) {
+	if logLevel <= LevelInfo {
+		log.Printf("[INFO] "+msg, args...)
+	}
+}
+
+// Error логирует ошибки
+func Error(ctx context.Context, err error, msg string, args ...interface{}) {
+	if logLevel <= LevelError {
+		if err != nil {
+			log.Printf("[ERROR] "+msg+": %v", append(args, err)...)
+		} else {
+			log.Printf("[ERROR] "+msg, args...)
+		}
+	}
 }

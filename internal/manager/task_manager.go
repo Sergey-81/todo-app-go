@@ -1,14 +1,31 @@
 package manager
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
+	"todo-app/internal/logger"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
+
+// Task представляет структуру задачи
+type Task struct {
+	ID          int       `json:"id"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Completed   bool      `json:"completed"`
+}
+
+// UpdateTaskRequest содержит поля для обновления задачи
+type UpdateTaskRequest struct {
+	Description *string `json:"description,omitempty"`
+	Completed   *bool   `json:"completed,omitempty"`
+}
 
 var (
 	addTaskCount = promauto.NewCounterVec(
@@ -52,25 +69,22 @@ var (
 	)
 )
 
-type UpdateTaskRequest struct {
-	Description *string `json:"description,omitempty"`
-	Completed   *bool   `json:"completed,omitempty"`
-}
-
-type Task struct {
-	ID          int       `json:"id"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	Completed   bool      `json:"completed"`
-}
-
+// TaskManager управляет задачами
 type TaskManager struct {
-	tasks  []Task
-	lastID int
 	mu     sync.Mutex
+	tasks  map[int]Task
+	nextID int
 }
 
+// NewTaskManager создает новый менеджер задач
+func NewTaskManager() *TaskManager {
+	return &TaskManager{
+		tasks:  make(map[int]Task),
+		nextID: 1,
+	}
+}
+
+// AddTask добавляет новую задачу
 func (tm *TaskManager) AddTask(description string) (int, error) {
 	startTime := time.Now()
 	defer func() {
@@ -90,23 +104,24 @@ func (tm *TaskManager) AddTask(description string) (int, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	tm.lastID++
-	task := Task{
-		ID:          tm.lastID,
+	id := tm.nextID
+	tm.tasks[id] = Task{
+		ID:          id,
 		Description: description,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 		Completed:   false,
 	}
+	tm.nextID++
 
-	tm.tasks = append(tm.tasks, task)
-	
 	addTaskCount.WithLabelValues("success").Inc()
 	taskDescLength.Observe(float64(len(description)))
 	
-	return task.ID, nil
+	logger.Info(context.Background(), "Задача добавлена", "taskID", id)
+	return id, nil
 }
 
+// UpdateTask обновляет существующую задачу
 func (tm *TaskManager) UpdateTask(id int, req UpdateTaskRequest) (*Task, error) {
 	startTime := time.Now()
 	defer func() {
@@ -116,42 +131,45 @@ func (tm *TaskManager) UpdateTask(id int, req UpdateTaskRequest) (*Task, error) 
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	for i := range tm.tasks {
-		if tm.tasks[i].ID == id {
-			if req.Description != nil {
-				if *req.Description == "" {
-					updateTaskCount.WithLabelValues("error").Inc()
-					return nil, errors.New("описание не может быть пустым")
-				}
-				if len(*req.Description) > 1000 {
-					updateTaskCount.WithLabelValues("error").Inc()
-					return nil, errors.New("описание не может превышать 1000 символов")
-				}
-				tm.tasks[i].Description = *req.Description
-			}
-
-			if req.Completed != nil {
-				tm.tasks[i].Completed = *req.Completed
-			}
-
-			tm.tasks[i].UpdatedAt = time.Now()
-			updateTaskCount.WithLabelValues("success").Inc()
-			return &tm.tasks[i], nil
-		}
+	task, exists := tm.tasks[id]
+	if !exists {
+		updateTaskCount.WithLabelValues("error").Inc()
+		logger.Error(context.Background(), fmt.Errorf("задача не найдена"), "UpdateTask failed", "taskID", id)
+		return nil, fmt.Errorf("задача с ID %d не найдена", id)
 	}
 
-	updateTaskCount.WithLabelValues("error").Inc()
-	return nil, fmt.Errorf("задача с ID %d не найдена", id)
+	if req.Description != nil {
+		if *req.Description == "" {
+			updateTaskCount.WithLabelValues("error").Inc()
+			return nil, errors.New("описание не может быть пустым")
+		}
+		if len(*req.Description) > 1000 {
+			updateTaskCount.WithLabelValues("error").Inc()
+			return nil, errors.New("описание не может превышать 1000 символов")
+		}
+		task.Description = *req.Description
+	}
+
+	if req.Completed != nil {
+		task.Completed = *req.Completed
+	}
+
+	task.UpdatedAt = time.Now()
+	tm.tasks[id] = task
+	
+	updateTaskCount.WithLabelValues("success").Inc()
+	logger.Info(context.Background(), "Задача обновлена", "taskID", id)
+	return &task, nil
 }
 
+// GetTask возвращает задачу по ID
 func (tm *TaskManager) GetTask(id int) (*Task, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	for _, task := range tm.tasks {
-		if task.ID == id {
-			return &task, nil
-		}
+	task, exists := tm.tasks[id]
+	if !exists {
+		return nil, fmt.Errorf("задача не найдена")
 	}
-	return nil, fmt.Errorf("задача не найдена")
+	return &task, nil
 }
