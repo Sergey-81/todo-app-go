@@ -98,3 +98,4 @@ curl http://localhost:2112/metrics
 ### Реализован Docker:
 создан Dockerfile
 успешно "упаковал" своё Go-приложение в Docker-контейнер
+настроил CI/CD → GitHub Actions + Docker Hub

@@ -2,21 +2,29 @@ package manager
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"time"
-	
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-// Метрики Prometheus
 var (
 	addTaskCount = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "todoapp_tasks_added_total",
 			Help: "Total number of AddTask operations",
 		},
-		[]string{"status"}, // success/error
+		[]string{"status"},
+	)
+
+	updateTaskCount = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "todoapp_tasks_updated_total",
+			Help: "Total number of UpdateTask operations",
+		},
+		[]string{"status"},
 	)
 
 	taskDescLength = promauto.NewHistogram(
@@ -34,13 +42,27 @@ var (
 			Buckets: prometheus.DefBuckets,
 		},
 	)
+
+	updateTaskDuration = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "todoapp_update_task_duration_seconds",
+			Help:    "Duration of UpdateTask operation in seconds",
+			Buckets: prometheus.DefBuckets,
+		},
+	)
 )
 
+type UpdateTaskRequest struct {
+	Description *string `json:"description,omitempty"`
+	Completed   *bool   `json:"completed,omitempty"`
+}
+
 type Task struct {
-	ID          int
-	Description string
-	CreatedAt   time.Time
-	Completed   bool
+	ID          int       `json:"id"`
+	Description string    `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Completed   bool      `json:"completed"`
 }
 
 type TaskManager struct {
@@ -52,8 +74,7 @@ type TaskManager struct {
 func (tm *TaskManager) AddTask(description string) (int, error) {
 	startTime := time.Now()
 	defer func() {
-		duration := time.Since(startTime).Seconds()
-		addTaskDuration.Observe(duration)
+		addTaskDuration.Observe(time.Since(startTime).Seconds())
 	}()
 
 	if description == "" {
@@ -74,6 +95,7 @@ func (tm *TaskManager) AddTask(description string) (int, error) {
 		ID:          tm.lastID,
 		Description: description,
 		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 		Completed:   false,
 	}
 
@@ -83,4 +105,53 @@ func (tm *TaskManager) AddTask(description string) (int, error) {
 	taskDescLength.Observe(float64(len(description)))
 	
 	return task.ID, nil
+}
+
+func (tm *TaskManager) UpdateTask(id int, req UpdateTaskRequest) (*Task, error) {
+	startTime := time.Now()
+	defer func() {
+		updateTaskDuration.Observe(time.Since(startTime).Seconds())
+	}()
+
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	for i := range tm.tasks {
+		if tm.tasks[i].ID == id {
+			if req.Description != nil {
+				if *req.Description == "" {
+					updateTaskCount.WithLabelValues("error").Inc()
+					return nil, errors.New("описание не может быть пустым")
+				}
+				if len(*req.Description) > 1000 {
+					updateTaskCount.WithLabelValues("error").Inc()
+					return nil, errors.New("описание не может превышать 1000 символов")
+				}
+				tm.tasks[i].Description = *req.Description
+			}
+
+			if req.Completed != nil {
+				tm.tasks[i].Completed = *req.Completed
+			}
+
+			tm.tasks[i].UpdatedAt = time.Now()
+			updateTaskCount.WithLabelValues("success").Inc()
+			return &tm.tasks[i], nil
+		}
+	}
+
+	updateTaskCount.WithLabelValues("error").Inc()
+	return nil, fmt.Errorf("задача с ID %d не найдена", id)
+}
+
+func (tm *TaskManager) GetTask(id int) (*Task, error) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	for _, task := range tm.tasks {
+		if task.ID == id {
+			return &task, nil
+		}
+	}
+	return nil, fmt.Errorf("задача не найдена")
 }
