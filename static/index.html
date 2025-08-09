@@ -3,21 +3,69 @@
 <head>
     <meta charset="UTF-8">
     <title>Todo App</title>
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
-        .task { margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
-        .completed { text-decoration: line-through; color: #888; }
-        input { padding: 8px; width: 70%; }
-        button { padding: 8px 12px; margin-left: 5px; }
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 600px; 
+            margin: 0 auto; 
+            padding: 20px; 
+        }
+        .task { 
+            margin: 10px 0; 
+            padding: 10px; 
+            border: 1px solid #ddd; 
+            border-radius: 4px; 
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .completed { 
+            text-decoration: line-through; 
+            color: #888; 
+        }
+        input { 
+            padding: 8px; 
+            width: 70%; 
+        }
+        button { 
+            padding: 8px 12px; 
+            margin-left: 5px; 
+            background-color: #f44336;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #d32f2f;
+        }
+        #add-button {
+            background-color: #4CAF50;
+        }
+        #add-button:hover {
+            background-color: #388E3C;
+        }
+        .task-form {
+            margin-bottom: 20px;
+        }
     </style>
 </head>
 <body>
     <h1>Мои задачи</h1>
-    <form hx-post="/tasks" hx-target="#task-list" hx-swap="beforeend">
+    <form class="task-form" method="POST" action="/tasks">
         <input type="text" name="description" placeholder="Новая задача..." required>
-        <button>Добавить</button>
+        <button id="add-button" type="submit">Добавить</button>
     </form>
-    <div id="task-list" hx-get="/tasks" hx-trigger="load"></div>
+    
+    <div id="task-list">
+        {{range .Tasks}}
+        <div class="task {{if .Completed}}completed{{end}}">
+            <span>{{.Description}}</span>
+            <form method="POST" action="/tasks/delete/{{.ID}}" style="display: inline;">
+                <button type="submit">Удалить</button>
+            </form>
+        </div>
+        {{end}}
+    </div>
 </body>
 </html>

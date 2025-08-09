@@ -58,9 +58,9 @@ todoapp_add_task_duration_seconds (histogram) - время выполнения
 Написаны unit-тесты с 100% покрытием
 Подтверждена работа в CI (зеленый маркер в GitHub)
 ## Мониторинг
-Метрики доступны на порту 2112:
+Метрики доступны на порту 8080:
 ```bash
-curl http://localhost:2112/metrics
+curl http://localhost:8080/metrics
 
 ## 06-08-2025 21:31
 ### Реализация HTTP API для AddTask

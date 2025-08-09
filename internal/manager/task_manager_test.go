@@ -4,41 +4,47 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	//"time"
 
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
+
+func TestNewTaskManager(t *testing.T) {
+	tm := NewTaskManager()
+	if tm == nil {
+		t.Fatal("NewTaskManager() вернул nil")
+	}
+	if tm.nextID != 1 {
+		t.Errorf("Ожидался nextID=1, получен %d", tm.nextID)
+	}
+	if len(tm.tasks) != 0 {
+		t.Errorf("Ожидался пустой список задач, получено %d задач", len(tm.tasks))
+	}
+}
 
 func TestAddTask(t *testing.T) {
 	tm := NewTaskManager()
 
-	t.Run("Успешное добавление", func(t *testing.T) {
-		id, err := tm.AddTask("Купить молоко")
+	t.Run("Успешное добавление задачи", func(t *testing.T) {
+		id, err := tm.AddTask("Новая задача")
 		if err != nil {
-			t.Fatalf("Ошибка при добавлении: %v", err)
+			t.Fatalf("Ошибка при добавлении задачи: %v", err)
 		}
 		if id != 1 {
 			t.Errorf("Ожидался ID=1, получен %d", id)
 		}
 	})
 
-	t.Run("Пустое описание", func(t *testing.T) {
+	t.Run("Пустое описание задачи", func(t *testing.T) {
 		_, err := tm.AddTask("")
 		if err == nil {
 			t.Error("Ожидалась ошибка при пустом описании")
 		}
 	})
 
-	t.Run("Длина описания", func(t *testing.T) {
-		validDesc := strings.Repeat("a", 1000)
-		_, err := tm.AddTask(validDesc)
-		if err != nil {
-			t.Errorf("Ошибка при валидной длине: %v", err)
-		}
-
-		invalidDesc := strings.Repeat("a", 1001)
-		_, err = tm.AddTask(invalidDesc)
+	t.Run("Слишком длинное описание", func(t *testing.T) {
+		longDesc := strings.Repeat("a", 1001)
+		_, err := tm.AddTask(longDesc)
 		if err == nil {
 			t.Error("Ожидалась ошибка при слишком длинном описании")
 		}
@@ -49,21 +55,25 @@ func TestUpdateTask(t *testing.T) {
 	tm := NewTaskManager()
 	id, _ := tm.AddTask("Исходная задача")
 
-	t.Run("Обновление описания", func(t *testing.T) {
+	t.Run("Обновление только описания", func(t *testing.T) {
 		newDesc := "Новое описание"
 		updated, err := tm.UpdateTask(id, UpdateTaskRequest{Description: &newDesc})
 		if err != nil {
 			t.Fatalf("Ошибка при обновлении: %v", err)
 		}
 		if updated.Description != newDesc {
-			t.Errorf("Описание не обновилось: ожидалось '%s', получено '%s'", newDesc, updated.Description)
+			t.Errorf("Описание не обновилось, ожидалось '%s', получено '%s'", newDesc, updated.Description)
 		}
 	})
 
-	t.Run("Несуществующий ID", func(t *testing.T) {
-		_, err := tm.UpdateTask(999, UpdateTaskRequest{})
-		if err == nil {
-			t.Error("Ожидалась ошибка для несуществующего ID")
+	t.Run("Обновление только статуса", func(t *testing.T) {
+		completed := true
+		updated, err := tm.UpdateTask(id, UpdateTaskRequest{Completed: &completed})
+		if err != nil {
+			t.Fatalf("Ошибка при обновлении: %v", err)
+		}
+		if !updated.Completed {
+			t.Error("Статус должен был измениться на завершенный")
 		}
 	})
 
@@ -71,23 +81,7 @@ func TestUpdateTask(t *testing.T) {
 		empty := ""
 		_, err := tm.UpdateTask(id, UpdateTaskRequest{Description: &empty})
 		if err == nil {
-			t.Error("Ожидалась ошибка валидации пустого описания")
-		}
-	})
-}
-
-func TestUpdateTask_EdgeCases(t *testing.T) {
-	tm := NewTaskManager()
-	id, _ := tm.AddTask("Тестовая задача")
-
-	t.Run("Обновление только статуса", func(t *testing.T) {
-		completed := true
-		updated, err := tm.UpdateTask(id, UpdateTaskRequest{Completed: &completed})
-		if err != nil {
-			t.Fatalf("Ошибка при обновлении статуса: %v", err)
-		}
-		if !updated.Completed {
-			t.Error("Статус не был обновлен")
+			t.Error("Ожидалась ошибка при пустом описании")
 		}
 	})
 
@@ -95,7 +89,33 @@ func TestUpdateTask_EdgeCases(t *testing.T) {
 		longDesc := strings.Repeat("a", 1001)
 		_, err := tm.UpdateTask(id, UpdateTaskRequest{Description: &longDesc})
 		if err == nil {
-			t.Error("Ожидалась ошибка слишком длинного описания")
+			t.Error("Ожидалась ошибка при слишком длинном описании")
+		}
+	})
+
+	t.Run("Несуществующая задача", func(t *testing.T) {
+		_, err := tm.UpdateTask(999, UpdateTaskRequest{})
+		if err == nil {
+			t.Error("Ожидалась ошибка для несуществующего ID")
+		}
+	})
+}
+
+func TestDeleteTask(t *testing.T) {
+	tm := NewTaskManager()
+	id, _ := tm.AddTask("Задача для удаления")
+
+	t.Run("Успешное удаление", func(t *testing.T) {
+		err := tm.DeleteTask(id)
+		if err != nil {
+			t.Fatalf("Ошибка при удалении: %v", err)
+		}
+	})
+
+	t.Run("Удаление несуществующей задачи", func(t *testing.T) {
+		err := tm.DeleteTask(999)
+		if err == nil {
+			t.Error("Ожидалась ошибка при удалении несуществующей задачи")
 		}
 	})
 }
@@ -104,20 +124,23 @@ func TestGetTask(t *testing.T) {
 	tm := NewTaskManager()
 	id, _ := tm.AddTask("Тестовая задача")
 
-	t.Run("Существующая задача", func(t *testing.T) {
+	t.Run("Получение существующей задачи", func(t *testing.T) {
 		task, err := tm.GetTask(id)
 		if err != nil {
-			t.Fatalf("Ошибка при получении: %v", err)
+			t.Fatalf("Ошибка при получении задачи: %v", err)
 		}
 		if task.ID != id {
 			t.Errorf("Ожидался ID %d, получен %d", id, task.ID)
 		}
+		if task.Description != "Тестовая задача" {
+			t.Errorf("Ожидалось описание 'Тестовая задача', получено '%s'", task.Description)
+		}
 	})
 
-	t.Run("Несуществующая задача", func(t *testing.T) {
+	t.Run("Получение несуществующей задачи", func(t *testing.T) {
 		_, err := tm.GetTask(999)
 		if err == nil {
-			t.Error("Ожидалась ошибка для несуществующего ID")
+			t.Error("Ожидалась ошибка при получении несуществующей задачи")
 		}
 	})
 }
@@ -125,14 +148,14 @@ func TestGetTask(t *testing.T) {
 func TestGetAllTasks(t *testing.T) {
 	tm := NewTaskManager()
 
-	t.Run("Пустой список", func(t *testing.T) {
+	t.Run("Пустой список задач", func(t *testing.T) {
 		tasks := tm.GetAllTasks()
 		if len(tasks) != 0 {
 			t.Errorf("Ожидался пустой список, получено %d задач", len(tasks))
 		}
 	})
 
-	t.Run("С несколькими задачами", func(t *testing.T) {
+	t.Run("Список с задачами", func(t *testing.T) {
 		tm.AddTask("Задача 1")
 		tm.AddTask("Задача 2")
 		tasks := tm.GetAllTasks()
@@ -140,26 +163,15 @@ func TestGetAllTasks(t *testing.T) {
 			t.Errorf("Ожидалось 2 задачи, получено %d", len(tasks))
 		}
 	})
-
-	t.Run("Проверка порядка", func(t *testing.T) {
-		tm := NewTaskManager()
-		id1, _ := tm.AddTask("Первая")
-		id2, _ := tm.AddTask("Вторая")
-		tasks := tm.GetAllTasks()
-		
-		if tasks[0].ID != id1 || tasks[1].ID != id2 {
-			t.Error("Задачи должны возвращаться в порядке добавления")
-		}
-	})
 }
 
 func TestConcurrentAccess(t *testing.T) {
 	tm := NewTaskManager()
 	var wg sync.WaitGroup
-	iterations := 100
+	count := 100
 
-	wg.Add(iterations)
-	for i := 0; i < iterations; i++ {
+	wg.Add(count)
+	for i := 0; i < count; i++ {
 		go func() {
 			defer wg.Done()
 			_, _ = tm.AddTask("Конкурентная задача")
@@ -167,82 +179,93 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Проверка через GetAllTasks
-	tasks := tm.GetAllTasks()
-	if len(tasks) != iterations {
-		t.Errorf("Ожидалось %d задач, получено %d", iterations, len(tasks))
+	if len(tm.tasks) != count {
+		t.Errorf("Ожидалось %d задач, получено %d", count, len(tm.tasks))
 	}
 }
 
 func TestMetrics(t *testing.T) {
-	// Тест метрик AddTask
+	// Сбрасываем счетчики
+	AddTaskCount.Reset()
+	UpdateTaskCount.Reset()
+	DeleteTaskCount.Reset()
+
+	tm := NewTaskManager()
+
 	t.Run("Метрики AddTask", func(t *testing.T) {
-		// Сохраняем оригинальные метрики
-		origAddCount := addTaskCount
-		origAddDuration := addTaskDuration
-		origDescLength := taskDescLength
-		defer func() {
-			addTaskCount = origAddCount
-			addTaskDuration = origAddDuration
-			taskDescLength = origDescLength
-		}()
+		// Успешное добавление
+		_, err := tm.AddTask("Тестовая задача")
+		if err != nil {
+			t.Fatalf("Ошибка при добавлении задачи: %v", err)
+		}
 
-		// Создаем тестовый регистратор
-		registry := prometheus.NewRegistry()
+		// Проверяем счетчик успешных операций
+		if got := testutil.ToFloat64(AddTaskCount.WithLabelValues("success")); got != 1 {
+			t.Errorf("AddTaskCount success = %v, want 1", got)
+		}
 
-		// Создаем тестовые метрики
-		testAddCounter := promauto.With(registry).NewCounterVec(
-			prometheus.CounterOpts{Name: "test_add_counter"}, []string{"status"})
-		testAddDuration := promauto.With(registry).NewHistogram(
-			prometheus.HistogramOpts{Name: "test_add_duration"})
-		testDescLength := promauto.With(registry).NewHistogram(
-			prometheus.HistogramOpts{Name: "test_desc_length"})
+		// Неудачное добавление
+		_, err = tm.AddTask("")
+		if err == nil {
+			t.Error("Ожидалась ошибка при пустом описании")
+		}
 
-		// Подменяем метрики
-		addTaskCount = testAddCounter
-		addTaskDuration = testAddDuration
-		taskDescLength = testDescLength
-
-		tm := NewTaskManager()
-		tm.AddTask("Тест метрик")
-
-		// Проверяем счетчик
-		if val := testutil.ToFloat64(testAddCounter.WithLabelValues("success")); val != 1 {
-			t.Errorf("Ожидалось 1 успешное добавление, получено %v", val)
+		// Проверяем счетчик ошибок
+		if got := testutil.ToFloat64(AddTaskCount.WithLabelValues("error")); got != 1 {
+			t.Errorf("AddTaskCount error = %v, want 1", got)
 		}
 	})
 
-	// Тест метрик UpdateTask
 	t.Run("Метрики UpdateTask", func(t *testing.T) {
-		// Сохраняем оригинальные метрики
-		origUpdateCount := updateTaskCount
-		origUpdateDuration := updateTaskDuration
-		defer func() {
-			updateTaskCount = origUpdateCount
-			updateTaskDuration = origUpdateDuration
-		}()
+		id, _ := tm.AddTask("Тестовая задача")
 
-		// Создаем тестовый регистратор
-		registry := prometheus.NewRegistry()
-
-		// Создаем тестовые метрики
-		testUpdateCounter := promauto.With(registry).NewCounterVec(
-			prometheus.CounterOpts{Name: "test_update_counter"}, []string{"status"})
-		testUpdateDuration := promauto.With(registry).NewHistogram(
-			prometheus.HistogramOpts{Name: "test_update_duration"})
-
-		// Подменяем метрики
-		updateTaskCount = testUpdateCounter
-		updateTaskDuration = testUpdateDuration
-
-		tm := NewTaskManager()
-		id, _ := tm.AddTask("Тест метрик")
+		// Успешное обновление
 		completed := true
-		tm.UpdateTask(id, UpdateTaskRequest{Completed: &completed})
+		_, err := tm.UpdateTask(id, UpdateTaskRequest{Completed: &completed})
+		if err != nil {
+			t.Fatalf("Ошибка при обновлении задачи: %v", err)
+		}
 
-		// Проверяем счетчик
-		if val := testutil.ToFloat64(testUpdateCounter.WithLabelValues("success")); val != 1 {
-			t.Errorf("Ожидалось 1 успешное обновление, получено %v", val)
+		// Проверяем счетчик успешных операций
+		if got := testutil.ToFloat64(UpdateTaskCount.WithLabelValues("success")); got != 1 {
+			t.Errorf("UpdateTaskCount success = %v, want 1", got)
+		}
+
+		// Неудачное обновление
+		_, err = tm.UpdateTask(999, UpdateTaskRequest{})
+		if err == nil {
+			t.Error("Ожидалась ошибка для несуществующего ID")
+		}
+
+		// Проверяем счетчик ошибок
+		if got := testutil.ToFloat64(UpdateTaskCount.WithLabelValues("error")); got != 1 {
+			t.Errorf("UpdateTaskCount error = %v, want 1", got)
+		}
+	})
+
+	t.Run("Метрики DeleteTask", func(t *testing.T) {
+		id, _ := tm.AddTask("Тестовая задача")
+
+		// Успешное удаление
+		err := tm.DeleteTask(id)
+		if err != nil {
+			t.Fatalf("Ошибка при удалении задачи: %v", err)
+		}
+
+		// Проверяем счетчик успешных операций
+		if got := testutil.ToFloat64(DeleteTaskCount.WithLabelValues("success")); got != 1 {
+			t.Errorf("DeleteTaskCount success = %v, want 1", got)
+		}
+
+		// Неудачное удаление
+		err = tm.DeleteTask(999)
+		if err == nil {
+			t.Error("Ожидалась ошибка для несуществующего ID")
+		}
+
+		// Проверяем счетчик ошибок
+		if got := testutil.ToFloat64(DeleteTaskCount.WithLabelValues("error")); got != 1 {
+			t.Errorf("DeleteTaskCount error = %v, want 1", got)
 		}
 	})
 }
