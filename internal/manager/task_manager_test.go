@@ -122,6 +122,37 @@ func TestGetTask(t *testing.T) {
 	})
 }
 
+func TestGetAllTasks(t *testing.T) {
+	tm := NewTaskManager()
+
+	t.Run("Пустой список", func(t *testing.T) {
+		tasks := tm.GetAllTasks()
+		if len(tasks) != 0 {
+			t.Errorf("Ожидался пустой список, получено %d задач", len(tasks))
+		}
+	})
+
+	t.Run("С несколькими задачами", func(t *testing.T) {
+		tm.AddTask("Задача 1")
+		tm.AddTask("Задача 2")
+		tasks := tm.GetAllTasks()
+		if len(tasks) != 2 {
+			t.Errorf("Ожидалось 2 задачи, получено %d", len(tasks))
+		}
+	})
+
+	t.Run("Проверка порядка", func(t *testing.T) {
+		tm := NewTaskManager()
+		id1, _ := tm.AddTask("Первая")
+		id2, _ := tm.AddTask("Вторая")
+		tasks := tm.GetAllTasks()
+		
+		if tasks[0].ID != id1 || tasks[1].ID != id2 {
+			t.Error("Задачи должны возвращаться в порядке добавления")
+		}
+	})
+}
+
 func TestConcurrentAccess(t *testing.T) {
 	tm := NewTaskManager()
 	var wg sync.WaitGroup
@@ -136,9 +167,10 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Проверка через GetTask
-	if _, err := tm.GetTask(iterations); err != nil {
-		t.Errorf("Не все задачи были добавлены, последняя ошибка: %v", err)
+	// Проверка через GetAllTasks
+	tasks := tm.GetAllTasks()
+	if len(tasks) != iterations {
+		t.Errorf("Ожидалось %d задач, получено %d", iterations, len(tasks))
 	}
 }
 

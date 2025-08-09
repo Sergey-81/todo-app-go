@@ -72,7 +72,7 @@ var (
 // TaskManager управляет задачами
 type TaskManager struct {
 	mu     sync.Mutex
-	tasks  map[int]Task
+	tasks  map[int]Task  // Храним Task, а не *Task
 	nextID int
 }
 
@@ -172,4 +172,16 @@ func (tm *TaskManager) GetTask(id int) (*Task, error) {
 		return nil, fmt.Errorf("задача не найдена")
 	}
 	return &task, nil
+}
+
+// GetAllTasks возвращает список всех задач
+func (tm *TaskManager) GetAllTasks() []Task {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	tasks := make([]Task, 0, len(tm.tasks))
+	for _, task := range tm.tasks {
+		tasks = append(tasks, task)  // Убрано разыменование, так как task уже не указатель
+	}
+	return tasks
 }
