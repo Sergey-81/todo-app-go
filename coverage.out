@@ -36,3 +36,7 @@ todo-app/internal/manager/task_manager.go:218.18,220.6 1 1
 todo-app/internal/manager/task_manager.go:222.5,226.16 4 1
 todo-app/internal/manager/task_manager.go:226.16,229.6 2 1
 todo-app/internal/manager/task_manager.go:231.5,238.22 6 1
+todo-app/internal/manager/task_manager.go:241.60,246.35 4 1
+todo-app/internal/manager/task_manager.go:246.35,247.61 1 1
+todo-app/internal/manager/task_manager.go:247.61,249.10 1 1
+todo-app/internal/manager/task_manager.go:251.5,251.17 1 1

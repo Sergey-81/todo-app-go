@@ -349,3 +349,33 @@ func TestMetrics(t *testing.T) {
 		}
 	})
 }
+
+func TestFilterTasks(t *testing.T) {
+    tm := NewTaskManager()
+    tm.AddTask("Активная задача")
+    completedID, _ := tm.AddTask("Выполненная задача")
+    tm.ToggleComplete(completedID)
+
+    t.Run("Фильтр Все", func(t *testing.T) {
+        tasks := tm.FilterTasks(nil)
+        if len(tasks) != 2 {
+            t.Errorf("Ожидалось 2 задачи, получено %d", len(tasks))
+        }
+    })
+
+    t.Run("Фильтр Выполненные", func(t *testing.T) {
+        completed := true
+        tasks := tm.FilterTasks(&completed)
+        if len(tasks) != 1 || !tasks[0].Completed {
+            t.Error("Ожидалась 1 выполненная задача")
+        }
+    })
+
+    t.Run("Фильтр Активные", func(t *testing.T) {
+        active := false
+        tasks := tm.FilterTasks(&active)
+        if len(tasks) != 1 || tasks[0].Completed {
+            t.Error("Ожидалась 1 активная задача")
+        }
+    })
+}

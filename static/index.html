@@ -94,6 +94,26 @@
             margin-top: 10px;
             gap: 5px;
         }
+        .filters {
+            margin: 15px 0;
+            display: flex;
+            gap: 10px;
+        }
+        .filter-btn {
+            padding: 8px 12px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            text-decoration: none;
+            color: #333;
+            transition: background 0.2s;
+        }
+        .filter-btn:hover {
+            background: #d0d0d0;
+        }
+        .active-filter {
+            background: #2196F3;
+            color: white;
+        }
         h1 {
             color: #333;
             text-align: center;
@@ -106,6 +126,12 @@
         <input type="text" name="description" placeholder="Новая задача..." required>
         <button id="add-button" type="submit">➕ Добавить</button>
     </form>
+    
+    <div class="filters">
+        <a href="/tasks/filter/all" class="filter-btn">Все задачи</a>
+        <a href="/tasks/filter/active" class="filter-btn">Активные</a>
+        <a href="/tasks/filter/completed" class="filter-btn">Выполненные</a>
+    </div>
     
     <div id="task-list">
         {{range .Tasks}}
@@ -156,6 +182,18 @@
             
             document.getElementById('edit-form-' + id).style.display = 'none';
         }
+
+        // Подсветка активного фильтра
+        document.addEventListener('DOMContentLoaded', function() {
+            const path = window.location.pathname;
+            const links = document.querySelectorAll('.filter-btn');
+            
+            links.forEach(link => {
+                if (path.includes(link.getAttribute('href'))) {
+                    link.classList.add('active-filter');
+                }
+            });
+        });
     </script>
 </body>
 </html>

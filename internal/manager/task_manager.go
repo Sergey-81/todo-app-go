@@ -237,3 +237,16 @@ func (tm *TaskManager) ToggleComplete(id int) (*Task, error) {
         "taskID", id, "completed", task.Completed)
     return &task, nil
 }
+
+func (tm *TaskManager) FilterTasks(completed *bool) []Task {
+    tm.mu.Lock()
+    defer tm.mu.Unlock()
+
+    tasks := make([]Task, 0)
+    for _, task := range tm.tasks {
+        if completed == nil || task.Completed == *completed {
+            tasks = append(tasks, task)
+        }
+    }
+    return tasks
+}

@@ -29,6 +29,7 @@ Available endpoints:
   POST   /tasks/toggle/{id} - Toggle task completion
   POST   /tasks/update/{id} - Update task
   POST   /tasks/delete/{id} - Delete task
+  GET    /tasks/filter/{status} - Filter tasks (all/completed/active)
   GET    /               - Web Interface (:8080)
   GET    /metrics        - Prometheus metrics
 -----------------------------
@@ -85,13 +86,37 @@ func setupRoutes(r *chi.Mux, tm *manager.TaskManager) {
 	// Метрики Prometheus
 	r.Handle("/metrics", promhttp.Handler())
 
-	// Главная страница
+	// Главная страница (все задачи)
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		tmpl := template.Must(template.ParseFiles("static/index.html"))
 		data := TemplateData{
 			Tasks: tm.GetAllTasks(),
 		}
 		tmpl.Execute(w, data)
+	})
+
+	// Фильтрация задач
+	r.Get("/tasks/filter/{status}", func(w http.ResponseWriter, r *http.Request) {
+		status := chi.URLParam(r, "status")
+		var completed *bool
+		
+		switch status {
+		case "completed":
+			val := true
+			completed = &val
+		case "active":
+			val := false
+			completed = &val
+		case "all":
+			completed = nil
+		default:
+			http.Error(w, "Недопустимый статус фильтра", http.StatusBadRequest)
+			return
+		}
+
+		tasks := tm.FilterTasks(completed)
+		tmpl := template.Must(template.ParseFiles("static/index.html"))
+		tmpl.Execute(w, TemplateData{Tasks: tasks})
 	})
 
 	// Добавление задачи
