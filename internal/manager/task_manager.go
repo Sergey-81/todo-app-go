@@ -212,3 +212,28 @@ func (tm *TaskManager) GetAllTasks() []Task {
 	}
 	return tasks
 }
+
+func (tm *TaskManager) ToggleComplete(id int) (*Task, error) {
+    start := time.Now()
+    defer func() {
+        UpdateTaskDuration.Observe(time.Since(start).Seconds())
+    }()
+
+    tm.mu.Lock()
+    defer tm.mu.Unlock()
+
+    task, exists := tm.tasks[id]
+    if !exists {
+        UpdateTaskCount.WithLabelValues("error").Inc()
+        return nil, fmt.Errorf("задача с ID %d не найдена", id)
+    }
+
+    task.Completed = !task.Completed
+    task.UpdatedAt = time.Now()
+    tm.tasks[id] = task
+
+    UpdateTaskCount.WithLabelValues("success").Inc()
+    logger.Info(context.Background(), "Статус задачи изменен", 
+        "taskID", id, "completed", task.Completed)
+    return &task, nil
+}

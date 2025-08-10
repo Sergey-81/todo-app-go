@@ -4,67 +4,99 @@
     <meta charset="UTF-8">
     <title>Todo App</title>
     <style>
-        body { 
-            font-family: Arial, sans-serif; 
-            max-width: 600px; 
-            margin: 0 auto; 
-            padding: 20px; 
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f9f9f9;
         }
-        .task { 
-            margin: 10px 0; 
-            padding: 10px; 
-            border: 1px solid #ddd; 
-            border-radius: 4px; 
+        .task {
+            margin: 12px 0;
+            padding: 12px;
+            border-left: 4px solid #2196F3;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
             display: flex;
             justify-content: space-between;
             align-items: center;
             flex-wrap: wrap;
+            transition: all 0.3s ease;
         }
-        .completed { 
-            text-decoration: line-through; 
-            color: #888; 
+        .task.completed {
+            border-left-color: #4CAF50;
+            opacity: 0.7;
+            background-color: #f5f5f5;
         }
-        input { 
-            padding: 8px; 
-            width: 70%; 
+        .task-content {
+            flex-grow: 1;
+            margin-right: 10px;
         }
-        button { 
-            padding: 8px 12px; 
-            margin-left: 5px; 
-            background-color: #f44336;
-            color: white;
+        .task-description {
+            word-break: break-word;
+        }
+        .task-actions {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        input {
+            padding: 8px;
+            width: 70%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            padding: 8px 12px;
             border: none;
             border-radius: 4px;
             cursor: pointer;
-        }
-        button:hover {
-            background-color: #d32f2f;
+            font-size: 14px;
+            transition: background 0.2s;
         }
         #add-button {
             background-color: #4CAF50;
+            color: white;
         }
         #add-button:hover {
             background-color: #388E3C;
         }
+        .complete-button {
+            background-color: #ff9800;
+            color: white;
+        }
+        .complete-button:hover {
+            background-color: #e68a00;
+        }
         .edit-button {
             background-color: #2196F3;
+            color: white;
         }
         .edit-button:hover {
             background-color: #0b7dda;
         }
+        .delete-button {
+            background-color: #f44336;
+            color: white;
+        }
+        .delete-button:hover {
+            background-color: #d32f2f;
+        }
         .task-form {
             margin-bottom: 20px;
+            display: flex;
+            gap: 5px;
         }
         .edit-form {
             display: none;
             width: 100%;
             margin-top: 10px;
+            gap: 5px;
         }
-        .task-actions {
-            display: flex;
-        }
-        .task-content {
-            flex-grow: 1;
+        h1 {
+            color: #333;
+            text-align: center;
         }
     </style>
 </head>
@@ -72,7 +104,7 @@
     <h1>Мои задачи</h1>
     <form class="task-form" method="POST" action="/tasks">
         <input type="text" name="description" placeholder="Новая задача..." required>
-        <button id="add-button" type="submit">Добавить</button>
+        <button id="add-button" type="submit">➕ Добавить</button>
     </form>
     
     <div id="task-list">
@@ -81,18 +113,25 @@
             <div class="task-content">
                 <span class="task-description">{{.Description}}</span>
                 <div class="task-actions">
+                    <form method="POST" action="/tasks/toggle/{{.ID}}" style="display: inline;">
+                        <button type="submit" class="complete-button">
+                            {{if .Completed}}❌ Не выполнено{{else}}✅ Выполнено{{end}}
+                        </button>
+                    </form>
                     <button class="edit-button" 
-                            onclick="showEditForm('{{.ID}}', '{{.Description | js}}')">Редактировать</button>
+                            onclick="showEditForm('{{.ID}}', '{{.Description | js}}')">
+                        ✏️ Редактировать
+                    </button>
                     <form method="POST" action="/tasks/delete/{{.ID}}" style="display: inline;">
-                        <button type="submit">Удалить</button>
+                        <button type="submit" class="delete-button">🗑️ Удалить</button>
                     </form>
                 </div>
             </div>
             
             <form class="edit-form" id="edit-form-{{.ID}}" method="POST" action="/tasks/update/{{.ID}}">
                 <input type="text" name="description" value="{{.Description}}" required>
-                <button class="edit-button" type="submit">Сохранить</button>
-                <button type="button" onclick="hideEditForm('{{.ID}}')">Отмена</button>
+                <button class="edit-button" type="submit">💾 Сохранить</button>
+                <button type="button" class="delete-button" onclick="hideEditForm('{{.ID}}')">✖ Отмена</button>
             </form>
         </div>
         {{end}}

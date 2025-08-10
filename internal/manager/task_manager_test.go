@@ -4,7 +4,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	//"time"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -184,8 +184,74 @@ func TestConcurrentAccess(t *testing.T) {
 	}
 }
 
+func TestToggleComplete(t *testing.T) {
+	tm := NewTaskManager()
+	id, _ := tm.AddTask("Тестовая задача")
+
+	t.Run("Переключение с false на true", func(t *testing.T) {
+		task, err := tm.ToggleComplete(id)
+		if err != nil {
+			t.Fatalf("Ошибка при переключении статуса: %v", err)
+		}
+		if !task.Completed {
+			t.Error("Ожидалось completed=true после первого переключения")
+		}
+	})
+
+	t.Run("Переключение с true на false", func(t *testing.T) {
+		task, err := tm.ToggleComplete(id)
+		if err != nil {
+			t.Fatalf("Ошибка при переключении статуса: %v", err)
+		}
+		if task.Completed {
+			t.Error("Ожидалось completed=false после второго переключения")
+		}
+	})
+
+	t.Run("Несуществующая задача", func(t *testing.T) {
+		_, err := tm.ToggleComplete(999)
+		if err == nil {
+			t.Error("Ожидалась ошибка для несуществующего ID")
+		}
+	})
+
+	t.Run("Обновление времени модификации", func(t *testing.T) {
+		initialTask, _ := tm.GetTask(id)
+		time.Sleep(10 * time.Millisecond)
+		
+		task, err := tm.ToggleComplete(id)
+		if err != nil {
+			t.Fatalf("Ошибка при переключении статуса: %v", err)
+		}
+		
+		if !task.UpdatedAt.After(initialTask.UpdatedAt) {
+			t.Error("Время обновления должно было измениться")
+		}
+	})
+}
+
+func TestConcurrentToggle(t *testing.T) {
+	tm := NewTaskManager()
+	id, _ := tm.AddTask("Конкурентное переключение")
+	var wg sync.WaitGroup
+	iterations := 100
+
+	wg.Add(iterations)
+	for i := 0; i < iterations; i++ {
+		go func() {
+			defer wg.Done()
+			_, _ = tm.ToggleComplete(id)
+		}()
+	}
+	wg.Wait()
+
+	task, _ := tm.GetTask(id)
+	if task.Completed != (iterations%2 == 1) {
+		t.Errorf("Неожиданное состояние задачи после %d переключений", iterations)
+	}
+}
+
 func TestMetrics(t *testing.T) {
-	// Сбрасываем счетчики
 	AddTaskCount.Reset()
 	UpdateTaskCount.Reset()
 	DeleteTaskCount.Reset()
@@ -193,24 +259,20 @@ func TestMetrics(t *testing.T) {
 	tm := NewTaskManager()
 
 	t.Run("Метрики AddTask", func(t *testing.T) {
-		// Успешное добавление
 		_, err := tm.AddTask("Тестовая задача")
 		if err != nil {
 			t.Fatalf("Ошибка при добавлении задачи: %v", err)
 		}
 
-		// Проверяем счетчик успешных операций
 		if got := testutil.ToFloat64(AddTaskCount.WithLabelValues("success")); got != 1 {
 			t.Errorf("AddTaskCount success = %v, want 1", got)
 		}
 
-		// Неудачное добавление
 		_, err = tm.AddTask("")
 		if err == nil {
 			t.Error("Ожидалась ошибка при пустом описании")
 		}
 
-		// Проверяем счетчик ошибок
 		if got := testutil.ToFloat64(AddTaskCount.WithLabelValues("error")); got != 1 {
 			t.Errorf("AddTaskCount error = %v, want 1", got)
 		}
@@ -219,25 +281,21 @@ func TestMetrics(t *testing.T) {
 	t.Run("Метрики UpdateTask", func(t *testing.T) {
 		id, _ := tm.AddTask("Тестовая задача")
 
-		// Успешное обновление
 		completed := true
 		_, err := tm.UpdateTask(id, UpdateTaskRequest{Completed: &completed})
 		if err != nil {
 			t.Fatalf("Ошибка при обновлении задачи: %v", err)
 		}
 
-		// Проверяем счетчик успешных операций
 		if got := testutil.ToFloat64(UpdateTaskCount.WithLabelValues("success")); got != 1 {
 			t.Errorf("UpdateTaskCount success = %v, want 1", got)
 		}
 
-		// Неудачное обновление
 		_, err = tm.UpdateTask(999, UpdateTaskRequest{})
 		if err == nil {
 			t.Error("Ожидалась ошибка для несуществующего ID")
 		}
 
-		// Проверяем счетчик ошибок
 		if got := testutil.ToFloat64(UpdateTaskCount.WithLabelValues("error")); got != 1 {
 			t.Errorf("UpdateTaskCount error = %v, want 1", got)
 		}
@@ -246,26 +304,48 @@ func TestMetrics(t *testing.T) {
 	t.Run("Метрики DeleteTask", func(t *testing.T) {
 		id, _ := tm.AddTask("Тестовая задача")
 
-		// Успешное удаление
 		err := tm.DeleteTask(id)
 		if err != nil {
 			t.Fatalf("Ошибка при удалении задачи: %v", err)
 		}
 
-		// Проверяем счетчик успешных операций
 		if got := testutil.ToFloat64(DeleteTaskCount.WithLabelValues("success")); got != 1 {
 			t.Errorf("DeleteTaskCount success = %v, want 1", got)
 		}
 
-		// Неудачное удаление
 		err = tm.DeleteTask(999)
 		if err == nil {
 			t.Error("Ожидалась ошибка для несуществующего ID")
 		}
 
-		// Проверяем счетчик ошибок
 		if got := testutil.ToFloat64(DeleteTaskCount.WithLabelValues("error")); got != 1 {
 			t.Errorf("DeleteTaskCount error = %v, want 1", got)
+		}
+	})
+
+	t.Run("Метрики ToggleComplete", func(t *testing.T) {
+		id, _ := tm.AddTask("Тестовая задача для toggle")
+
+		_, err := tm.ToggleComplete(id)
+		if err != nil {
+			t.Fatalf("Ошибка при переключении статуса: %v", err)
+		}
+
+		if got := testutil.ToFloat64(UpdateTaskCount.WithLabelValues("success")); got != 2 {
+			t.Errorf("UpdateTaskCount success = %v, want 2", got)
+		}
+
+		if got := testutil.CollectAndCount(UpdateTaskDuration); got < 1 {
+			t.Errorf("UpdateTaskDuration не был записан")
+		}
+
+		_, err = tm.ToggleComplete(999)
+		if err == nil {
+			t.Error("Ожидалась ошибка для несуществующего ID")
+		}
+
+		if got := testutil.ToFloat64(UpdateTaskCount.WithLabelValues("error")); got != 2 {
+			t.Errorf("UpdateTaskCount error = %v, want 2", got)
 		}
 	})
 }

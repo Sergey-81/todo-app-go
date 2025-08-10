@@ -25,11 +25,12 @@ func printWelcomeMessage() {
 🚀 Todo-App Server
 -----------------------------
 Available endpoints:
-  POST   /tasks        - Add new task
+  POST   /tasks          - Add new task
+  POST   /tasks/toggle/{id} - Toggle task completion
   POST   /tasks/update/{id} - Update task
   POST   /tasks/delete/{id} - Delete task
-  GET    /             - Web Interface (:8080)
-  GET    /metrics      - Prometheus metrics
+  GET    /               - Web Interface (:8080)
+  GET    /metrics        - Prometheus metrics
 -----------------------------
 Storage type: In-Memory
 Start time: ` + time.Now().Format("2006-01-02 15:04:05") + `
@@ -114,6 +115,31 @@ func setupRoutes(r *chi.Mux, tm *manager.TaskManager) {
 		manager.AddTaskCount.WithLabelValues("success").Inc()
 		manager.AddTaskDuration.Observe(time.Since(startTime).Seconds())
 		manager.TaskDescLength.Observe(float64(len(description)))
+		
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+
+	// Переключение статуса задачи
+	r.Post("/tasks/toggle/{id}", func(w http.ResponseWriter, r *http.Request) {
+		startTime := time.Now()
+		idStr := chi.URLParam(r, "id")
+		id, err := strconv.Atoi(idStr)
+		
+		if err != nil {
+			manager.UpdateTaskCount.WithLabelValues("error").Inc()
+			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
+			return
+		}
+
+		_, err = tm.ToggleComplete(id)
+		if err != nil {
+			manager.UpdateTaskCount.WithLabelValues("error").Inc()
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		manager.UpdateTaskCount.WithLabelValues("success").Inc()
+		manager.UpdateTaskDuration.Observe(time.Since(startTime).Seconds())
 		
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})
