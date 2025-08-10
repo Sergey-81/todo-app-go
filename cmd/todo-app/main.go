@@ -26,6 +26,7 @@ func printWelcomeMessage() {
 -----------------------------
 Available endpoints:
   POST   /tasks        - Add new task
+  POST   /tasks/update/{id} - Update task
   POST   /tasks/delete/{id} - Delete task
   GET    /             - Web Interface (:8080)
   GET    /metrics      - Prometheus metrics
@@ -113,6 +114,40 @@ func setupRoutes(r *chi.Mux, tm *manager.TaskManager) {
 		manager.AddTaskCount.WithLabelValues("success").Inc()
 		manager.AddTaskDuration.Observe(time.Since(startTime).Seconds())
 		manager.TaskDescLength.Observe(float64(len(description)))
+		
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+
+	// Обновление задачи
+	r.Post("/tasks/update/{id}", func(w http.ResponseWriter, r *http.Request) {
+		startTime := time.Now()
+		idStr := chi.URLParam(r, "id")
+		id, err := strconv.Atoi(idStr)
+		
+		if err != nil {
+			manager.UpdateTaskCount.WithLabelValues("error").Inc()
+			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
+			return
+		}
+
+		description := r.FormValue("description")
+		if description == "" {
+			manager.UpdateTaskCount.WithLabelValues("error").Inc()
+			http.Error(w, "Описание задачи обязательно", http.StatusBadRequest)
+			return
+		}
+
+		_, err = tm.UpdateTask(id, manager.UpdateTaskRequest{
+			Description: &description,
+		})
+		if err != nil {
+			manager.UpdateTaskCount.WithLabelValues("error").Inc()
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		manager.UpdateTaskCount.WithLabelValues("success").Inc()
+		manager.UpdateTaskDuration.Observe(time.Since(startTime).Seconds())
 		
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 	})

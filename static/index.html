@@ -18,6 +18,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
         }
         .completed { 
             text-decoration: line-through; 
@@ -45,8 +46,25 @@
         #add-button:hover {
             background-color: #388E3C;
         }
+        .edit-button {
+            background-color: #2196F3;
+        }
+        .edit-button:hover {
+            background-color: #0b7dda;
+        }
         .task-form {
             margin-bottom: 20px;
+        }
+        .edit-form {
+            display: none;
+            width: 100%;
+            margin-top: 10px;
+        }
+        .task-actions {
+            display: flex;
+        }
+        .task-content {
+            flex-grow: 1;
         }
     </style>
 </head>
@@ -59,13 +77,46 @@
     
     <div id="task-list">
         {{range .Tasks}}
-        <div class="task {{if .Completed}}completed{{end}}">
-            <span>{{.Description}}</span>
-            <form method="POST" action="/tasks/delete/{{.ID}}" style="display: inline;">
-                <button type="submit">Удалить</button>
+        <div class="task {{if .Completed}}completed{{end}}" id="task-{{.ID}}">
+            <div class="task-content">
+                <span class="task-description">{{.Description}}</span>
+                <div class="task-actions">
+                    <button class="edit-button" 
+                            onclick="showEditForm('{{.ID}}', '{{.Description | js}}')">Редактировать</button>
+                    <form method="POST" action="/tasks/delete/{{.ID}}" style="display: inline;">
+                        <button type="submit">Удалить</button>
+                    </form>
+                </div>
+            </div>
+            
+            <form class="edit-form" id="edit-form-{{.ID}}" method="POST" action="/tasks/update/{{.ID}}">
+                <input type="text" name="description" value="{{.Description}}" required>
+                <button class="edit-button" type="submit">Сохранить</button>
+                <button type="button" onclick="hideEditForm('{{.ID}}')">Отмена</button>
             </form>
         </div>
         {{end}}
     </div>
+
+    <script>
+        function showEditForm(id, description) {
+            const taskElement = document.getElementById('task-' + id);
+            taskElement.querySelector('.task-description').style.display = 'none';
+            taskElement.querySelector('.task-actions').style.display = 'none';
+            
+            const editForm = document.getElementById('edit-form-' + id);
+            editForm.style.display = 'flex';
+            editForm.querySelector('input').value = description;
+            editForm.querySelector('input').focus();
+        }
+
+        function hideEditForm(id) {
+            const taskElement = document.getElementById('task-' + id);
+            taskElement.querySelector('.task-description').style.display = 'inline';
+            taskElement.querySelector('.task-actions').style.display = 'flex';
+            
+            document.getElementById('edit-form-' + id).style.display = 'none';
+        }
+    </script>
 </body>
 </html>
