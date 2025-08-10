@@ -379,3 +379,59 @@ func TestFilterTasks(t *testing.T) {
         }
     })
 }
+
+func TestFilterByPriority(t *testing.T) {
+	tm := NewTaskManager()
+	
+	// Добавляем задачи с разными приоритетами
+	lowID, _ := tm.AddTask("Низкий приоритет")
+	medID, _ := tm.AddTask("Средний приоритет")
+	highID, _ := tm.AddTask("Высокий приоритет")
+	
+	// Обновляем приоритеты (исправляем проблему с адресом констант)
+	lowPriority := PriorityLow
+	medPriority := PriorityMedium
+	highPriority := PriorityHigh
+	
+	tm.UpdateTask(lowID, UpdateTaskRequest{Priority: &lowPriority})
+	tm.UpdateTask(medID, UpdateTaskRequest{Priority: &medPriority})
+	tm.UpdateTask(highID, UpdateTaskRequest{Priority: &highPriority})
+	
+	t.Run("Фильтр по высокому приоритету", func(t *testing.T) {
+		tasks := tm.FilterByPriority(PriorityHigh)
+		if len(tasks) != 1 {
+			t.Fatalf("Ожидалась 1 задача с высоким приоритетом, получено %d", len(tasks))
+		}
+		if tasks[0].Priority != PriorityHigh {
+			t.Errorf("Ожидался приоритет 'high', получен '%s'", tasks[0].Priority)
+		}
+	})
+	
+	t.Run("Фильтр по среднему приоритету", func(t *testing.T) {
+		tasks := tm.FilterByPriority(PriorityMedium)
+		if len(tasks) != 1 {
+			t.Fatalf("Ожидалась 1 задача со средним приоритетом, получено %d", len(tasks))
+		}
+		if tasks[0].Priority != PriorityMedium {
+			t.Errorf("Ожидался приоритет 'medium', получен '%s'", tasks[0].Priority)
+		}
+	})
+	
+	t.Run("Фильтр по низкому приоритету", func(t *testing.T) {
+		tasks := tm.FilterByPriority(PriorityLow)
+		if len(tasks) != 1 {
+			t.Fatalf("Ожидалась 1 задача с низким приоритетом, получено %d", len(tasks))
+		}
+		if tasks[0].Priority != PriorityLow {
+			t.Errorf("Ожидался приоритет 'low', получен '%s'", tasks[0].Priority)
+		}
+	})
+	
+	t.Run("Нет задач с указанным приоритетом", func(t *testing.T) {
+		tasks := tm.FilterByPriority("unknown")
+		if len(tasks) != 0 {
+			t.Errorf("Ожидалось 0 задач, получено %d", len(tasks))
+		}
+	})
+}
+

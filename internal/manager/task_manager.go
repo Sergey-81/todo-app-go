@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -71,17 +72,29 @@ var (
 	)
 )
 
+type Priority string
+
+const (
+	PriorityLow    Priority = "low"
+	PriorityMedium Priority = "medium"
+	PriorityHigh   Priority = "high"
+)
+
 type Task struct {
 	ID          int       `json:"id"`
 	Description string    `json:"description"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	Completed   bool      `json:"completed"`
+	Priority    Priority  `json:"priority"`
+	DueDate     time.Time `json:"due_date"`
 }
 
 type UpdateTaskRequest struct {
-	Description *string `json:"description,omitempty"`
-	Completed   *bool   `json:"completed,omitempty"`
+	Description *string    `json:"description,omitempty"`
+	Completed   *bool      `json:"completed,omitempty"`
+	Priority    *Priority  `json:"priority,omitempty"`
+	DueDate     *time.Time `json:"due_date,omitempty"`
 }
 
 type TaskManager struct {
@@ -123,6 +136,7 @@ func (tm *TaskManager) AddTask(description string) (int, error) {
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 		Completed:   false,
+		Priority:    PriorityMedium,
 	}
 	tm.nextID++
 
@@ -161,6 +175,14 @@ func (tm *TaskManager) UpdateTask(id int, req UpdateTaskRequest) (*Task, error) 
 
 	if req.Completed != nil {
 		task.Completed = *req.Completed
+	}
+
+	if req.Priority != nil {
+		task.Priority = *req.Priority
+	}
+
+	if req.DueDate != nil {
+		task.DueDate = *req.DueDate
 	}
 
 	task.UpdatedAt = time.Now()
@@ -214,39 +236,77 @@ func (tm *TaskManager) GetAllTasks() []Task {
 }
 
 func (tm *TaskManager) ToggleComplete(id int) (*Task, error) {
-    start := time.Now()
-    defer func() {
-        UpdateTaskDuration.Observe(time.Since(start).Seconds())
-    }()
+	start := time.Now()
+	defer func() {
+		UpdateTaskDuration.Observe(time.Since(start).Seconds())
+	}()
 
-    tm.mu.Lock()
-    defer tm.mu.Unlock()
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
 
-    task, exists := tm.tasks[id]
-    if !exists {
-        UpdateTaskCount.WithLabelValues("error").Inc()
-        return nil, fmt.Errorf("задача с ID %d не найдена", id)
-    }
+	task, exists := tm.tasks[id]
+	if !exists {
+		UpdateTaskCount.WithLabelValues("error").Inc()
+		return nil, fmt.Errorf("задача с ID %d не найдена", id)
+	}
 
-    task.Completed = !task.Completed
-    task.UpdatedAt = time.Now()
-    tm.tasks[id] = task
+	task.Completed = !task.Completed
+	task.UpdatedAt = time.Now()
+	tm.tasks[id] = task
 
-    UpdateTaskCount.WithLabelValues("success").Inc()
-    logger.Info(context.Background(), "Статус задачи изменен", 
-        "taskID", id, "completed", task.Completed)
-    return &task, nil
+	UpdateTaskCount.WithLabelValues("success").Inc()
+	logger.Info(context.Background(), "Статус задачи изменен", 
+		"taskID", id, "completed", task.Completed)
+	return &task, nil
 }
 
 func (tm *TaskManager) FilterTasks(completed *bool) []Task {
-    tm.mu.Lock()
-    defer tm.mu.Unlock()
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
 
-    tasks := make([]Task, 0)
-    for _, task := range tm.tasks {
-        if completed == nil || task.Completed == *completed {
-            tasks = append(tasks, task)
-        }
-    }
-    return tasks
+	tasks := make([]Task, 0)
+	for _, task := range tm.tasks {
+		if completed == nil || task.Completed == *completed {
+			tasks = append(tasks, task)
+		}
+	}
+	return tasks
+}
+
+func (tm *TaskManager) FilterByPriority(priority Priority) []Task {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	tasks := make([]Task, 0)
+	for _, task := range tm.tasks {
+		if task.Priority == priority {
+			tasks = append(tasks, task)
+		}
+	}
+	return tasks
+}
+
+func (tm *TaskManager) GetUpcomingTasks(days int) []Task {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+
+	now := time.Now()
+	limit := now.AddDate(0, 0, days)
+	tasks := make([]Task, 0)
+	
+	for _, task := range tm.tasks {
+		if !task.DueDate.IsZero() && 
+		   task.DueDate.After(now) && 
+		   task.DueDate.Before(limit) && 
+		   !task.Completed {
+			tasks = append(tasks, task)
+		}
+	}
+	
+	// Сортируем по дате выполнения (ближайшие сначала)
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].DueDate.Before(tasks[j].DueDate)
+	})
+	
+	return tasks
 }

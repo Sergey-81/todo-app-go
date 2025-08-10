@@ -20,6 +20,14 @@ type TemplateData struct {
 	Tasks []manager.Task
 }
 
+// Функции для шаблона
+var templateFuncs = template.FuncMap{
+	"now": time.Now,
+	"daysLeft": func(dueDate time.Time) int {
+		return int(time.Until(dueDate).Hours() / 24)
+	},
+}
+
 func printWelcomeMessage() {
 	println(`
 🚀 Todo-App Server
@@ -30,6 +38,8 @@ Available endpoints:
   POST   /tasks/update/{id} - Update task
   POST   /tasks/delete/{id} - Delete task
   GET    /tasks/filter/{status} - Filter tasks (all/completed/active)
+  GET    /tasks/priority/{priority} - Filter by priority (low/medium/high)
+  GET    /tasks/upcoming/{days} - Upcoming tasks (within days)
   GET    /               - Web Interface (:8080)
   GET    /metrics        - Prometheus metrics
 -----------------------------
@@ -88,7 +98,7 @@ func setupRoutes(r *chi.Mux, tm *manager.TaskManager) {
 
 	// Главная страница (все задачи)
 	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		tmpl := template.Must(template.ParseFiles("static/index.html"))
+		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
 		data := TemplateData{
 			Tasks: tm.GetAllTasks(),
 		}
@@ -115,7 +125,37 @@ func setupRoutes(r *chi.Mux, tm *manager.TaskManager) {
 		}
 
 		tasks := tm.FilterTasks(completed)
-		tmpl := template.Must(template.ParseFiles("static/index.html"))
+		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
+		tmpl.Execute(w, TemplateData{Tasks: tasks})
+	})
+
+	// Фильтрация по приоритету
+	r.Get("/tasks/priority/{priority}", func(w http.ResponseWriter, r *http.Request) {
+		priority := manager.Priority(chi.URLParam(r, "priority"))
+		
+		if priority != manager.PriorityLow && 
+		   priority != manager.PriorityMedium && 
+		   priority != manager.PriorityHigh {
+			http.Error(w, "Недопустимый приоритет", http.StatusBadRequest)
+			return
+		}
+		
+		tasks := tm.FilterByPriority(priority)
+		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
+		tmpl.Execute(w, TemplateData{Tasks: tasks})
+	})
+	
+	// Задачи с истекающим сроком
+	r.Get("/tasks/upcoming/{days}", func(w http.ResponseWriter, r *http.Request) {
+		daysStr := chi.URLParam(r, "days")
+		days, err := strconv.Atoi(daysStr)
+		if err != nil || days < 1 {
+			http.Error(w, "Недопустимое количество дней", http.StatusBadRequest)
+			return
+		}
+		
+		tasks := tm.GetUpcomingTasks(days)
+		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
 		tmpl.Execute(w, TemplateData{Tasks: tasks})
 	})
 
@@ -123,6 +163,8 @@ func setupRoutes(r *chi.Mux, tm *manager.TaskManager) {
 	r.Post("/tasks", func(w http.ResponseWriter, r *http.Request) {
 		startTime := time.Now()
 		description := r.FormValue("description")
+		priority := manager.Priority(r.FormValue("priority"))
+		dueDateStr := r.FormValue("due_date")
 		
 		if description == "" {
 			manager.AddTaskCount.WithLabelValues("error").Inc()
@@ -130,10 +172,39 @@ func setupRoutes(r *chi.Mux, tm *manager.TaskManager) {
 			return
 		}
 
-		_, err := tm.AddTask(description)
+		// Проверка приоритета
+		if priority != manager.PriorityLow && 
+		   priority != manager.PriorityMedium && 
+		   priority != manager.PriorityHigh {
+			priority = manager.PriorityMedium // Значение по умолчанию
+		}
+
+		// Парсинг даты выполнения
+		var dueDate time.Time
+		if dueDateStr != "" {
+			var err error
+			dueDate, err = time.Parse("2006-01-02", dueDateStr)
+			if err != nil {
+				http.Error(w, "Некорректная дата выполнения", http.StatusBadRequest)
+				return
+			}
+		}
+
+		taskID, err := tm.AddTask(description)
 		if err != nil {
 			manager.AddTaskCount.WithLabelValues("error").Inc()
 			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Обновляем приоритет и дату выполнения
+		_, err = tm.UpdateTask(taskID, manager.UpdateTaskRequest{
+			Priority: &priority,
+			DueDate:  &dueDate,
+		})
+		if err != nil {
+			manager.AddTaskCount.WithLabelValues("error").Inc()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 
@@ -188,8 +259,21 @@ func setupRoutes(r *chi.Mux, tm *manager.TaskManager) {
 			return
 		}
 
+		priority := manager.Priority(r.FormValue("priority"))
+		dueDateStr := r.FormValue("due_date")
+		var dueDate time.Time
+		if dueDateStr != "" {
+			dueDate, err = time.Parse("2006-01-02", dueDateStr)
+			if err != nil {
+				http.Error(w, "Некорректная дата выполнения", http.StatusBadRequest)
+				return
+			}
+		}
+
 		_, err = tm.UpdateTask(id, manager.UpdateTaskRequest{
 			Description: &description,
+			Priority:    &priority,
+			DueDate:     &dueDate,
 		})
 		if err != nil {
 			manager.UpdateTaskCount.WithLabelValues("error").Inc()

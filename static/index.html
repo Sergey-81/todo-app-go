@@ -6,7 +6,7 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 600px;
+            max-width: 800px;
             margin: 0 auto;
             padding: 20px;
             background-color: #f9f9f9;
@@ -35,15 +35,15 @@
         }
         .task-description {
             word-break: break-word;
+            margin-bottom: 5px;
         }
         .task-actions {
             display: flex;
             gap: 5px;
             flex-wrap: wrap;
         }
-        input {
+        input, select {
             padding: 8px;
-            width: 70%;
             border: 1px solid #ddd;
             border-radius: 4px;
         }
@@ -87,17 +87,20 @@
             margin-bottom: 20px;
             display: flex;
             gap: 5px;
+            flex-wrap: wrap;
         }
         .edit-form {
             display: none;
             width: 100%;
             margin-top: 10px;
             gap: 5px;
+            flex-wrap: wrap;
         }
         .filters {
             margin: 15px 0;
             display: flex;
             gap: 10px;
+            flex-wrap: wrap;
         }
         .filter-btn {
             padding: 8px 12px;
@@ -118,12 +121,53 @@
             color: #333;
             text-align: center;
         }
+        .priority {
+            font-size: 0.8em;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-right: 8px;
+            color: white;
+        }
+        .priority-low {
+            background-color: #4CAF50;
+        }
+        .priority-medium {
+            background-color: #FFC107;
+            color: black;
+        }
+        .priority-high {
+            background-color: #F44336;
+        }
+        .due-date {
+            font-size: 0.8em;
+            color: #666;
+        }
+        .due-date.soon {
+            color: #E91E63;
+            font-weight: bold;
+        }
+        .due-date.overdue {
+            color: #F44336;
+            font-weight: bold;
+        }
+        .task-info {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-top: 5px;
+        }
     </style>
 </head>
 <body>
     <h1>Мои задачи</h1>
     <form class="task-form" method="POST" action="/tasks">
-        <input type="text" name="description" placeholder="Новая задача..." required>
+        <input type="text" name="description" placeholder="Новая задача..." required style="flex-grow: 1;">
+        <select name="priority" style="width: 120px;">
+            <option value="low">Низкий</option>
+            <option value="medium" selected>Средний</option>
+            <option value="high">Высокий</option>
+        </select>
+        <input type="date" name="due_date" style="width: 150px;">
         <button id="add-button" type="submit">➕ Добавить</button>
     </form>
     
@@ -131,21 +175,37 @@
         <a href="/tasks/filter/all" class="filter-btn">Все задачи</a>
         <a href="/tasks/filter/active" class="filter-btn">Активные</a>
         <a href="/tasks/filter/completed" class="filter-btn">Выполненные</a>
+        <div style="display: flex; gap: 10px;">
+            <a href="/tasks/priority/low" class="filter-btn">Низкий</a>
+            <a href="/tasks/priority/medium" class="filter-btn">Средний</a>
+            <a href="/tasks/priority/high" class="filter-btn">Высокий</a>
+        </div>
+        <a href="/tasks/upcoming/7" class="filter-btn">На неделе</a>
     </div>
     
     <div id="task-list">
         {{range .Tasks}}
         <div class="task {{if .Completed}}completed{{end}}" id="task-{{.ID}}">
             <div class="task-content">
-                <span class="task-description">{{.Description}}</span>
+                <div class="task-description">{{.Description}}</div>
+                <div class="task-info">
+                    <span class="priority priority-{{.Priority}}">
+                        {{if eq .Priority "low"}}Низкий{{else if eq .Priority "medium"}}Средний{{else}}Высокий{{end}}
+                    </span>
+                    {{if not .DueDate.IsZero}}
+                    <span class="due-date {{if .DueDate.Before (now)}}overdue{{else if lt (daysLeft .DueDate) 3}}soon{{end}}">
+                        📅 {{.DueDate.Format "02.01.2006"}}
+                    </span>
+                    {{end}}
+                </div>
                 <div class="task-actions">
                     <form method="POST" action="/tasks/toggle/{{.ID}}" style="display: inline;">
                         <button type="submit" class="complete-button">
-                            {{if .Completed}}❌ Не выполнено{{else}}✅ Выполнено{{end}}
+                            {{if .Completed}}✅ Выполнено{{else}}❌ Не выполнено{{end}}
                         </button>
                     </form>
                     <button class="edit-button" 
-                            onclick="showEditForm('{{.ID}}', '{{.Description | js}}')">
+                            onclick='showEditForm("{{.ID}}", "{{.Description | js}}", "{{.Priority}}", "{{if not .DueDate.IsZero}}{{.DueDate.Format `2006-01-02`}}{{end}}")'>
                         ✏️ Редактировать
                     </button>
                     <form method="POST" action="/tasks/delete/{{.ID}}" style="display: inline;">
@@ -155,7 +215,29 @@
             </div>
             
             <form class="edit-form" id="edit-form-{{.ID}}" method="POST" action="/tasks/update/{{.ID}}">
-                <input type="text" name="description" value="{{.Description}}" required>
+                <input type="text" name="description" value="{{.Description}}" required style="flex-grow: 1;">
+                <select name="priority" style="width: 120px;">
+                    {{if eq .Priority "low"}}
+                    <option value="low" selected>Низкий</option>
+                    {{else}}
+                    <option value="low">Низкий</option>
+                    {{end}}
+                    {{if eq .Priority "medium"}}
+                    <option value="medium" selected>Средний</option>
+                    {{else}}
+                    <option value="medium">Средний</option>
+                    {{end}}
+                    {{if eq .Priority "high"}}
+                    <option value="high" selected>Высокий</option>
+                    {{else}}
+                    <option value="high">Высокий</option>
+                    {{end}}
+                </select>
+                {{if not .DueDate.IsZero}}
+                <input type="date" name="due_date" value="{{.DueDate.Format `2006-01-02`}}" style="width: 150px;">
+                {{else}}
+                <input type="date" name="due_date" style="width: 150px;">
+                {{end}}
                 <button class="edit-button" type="submit">💾 Сохранить</button>
                 <button type="button" class="delete-button" onclick="hideEditForm('{{.ID}}')">✖ Отмена</button>
             </form>
@@ -164,20 +246,24 @@
     </div>
 
     <script>
-        function showEditForm(id, description) {
+        function showEditForm(id, description, priority, dueDate) {
             const taskElement = document.getElementById('task-' + id);
             taskElement.querySelector('.task-description').style.display = 'none';
+            taskElement.querySelector('.task-info').style.display = 'none';
             taskElement.querySelector('.task-actions').style.display = 'none';
             
             const editForm = document.getElementById('edit-form-' + id);
             editForm.style.display = 'flex';
-            editForm.querySelector('input').value = description;
-            editForm.querySelector('input').focus();
+            editForm.querySelector('input[name="description"]').value = description;
+            editForm.querySelector('select[name="priority"]').value = priority;
+            editForm.querySelector('input[name="due_date"]').value = dueDate;
+            editForm.querySelector('input[name="description"]').focus();
         }
 
         function hideEditForm(id) {
             const taskElement = document.getElementById('task-' + id);
-            taskElement.querySelector('.task-description').style.display = 'inline';
+            taskElement.querySelector('.task-description').style.display = 'block';
+            taskElement.querySelector('.task-info').style.display = 'flex';
             taskElement.querySelector('.task-actions').style.display = 'flex';
             
             document.getElementById('edit-form-' + id).style.display = 'none';
