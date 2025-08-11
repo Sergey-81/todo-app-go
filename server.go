@@ -19,15 +19,19 @@ func addTaskHandler(tm *manager.TaskManager) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req models.CreateTaskRequest
 
-		// Декодируем JSON
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		defer r.Body.Close()
 
-		// Вызываем существующий метод AddTask
-		if _, err := tm.AddTask(req.Description); err != nil {
+		// Добавляем пустой слайс тегов, если они не переданы
+		tags := []string{}
+		if req.Tags != nil {
+			tags = req.Tags
+		}
+
+		if _, err := tm.AddTask(req.Description, tags); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}

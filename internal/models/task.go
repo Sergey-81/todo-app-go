@@ -9,5 +9,6 @@ type Task struct {
 
 // Новая структура только для HTTP-запроса
 type CreateTaskRequest struct {
-    Description string `json:"description"` // Важно: поле должно быть публичным (с большой буквы)
+	Description string   `json:"description"`
+	Tags        []string `json:"tags,omitempty"` // omitempty - поле необязательное
 }
