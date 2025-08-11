@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	//"todo-app/internal/logger"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -435,3 +436,89 @@ func TestFilterByPriority(t *testing.T) {
 	})
 }
 
+func TestGetUpcomingTasks(t *testing.T) {
+    tm := NewTaskManager()
+    now := time.Now()
+    today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+    
+    // Подготовка тестовых данных с явными датами
+    testTasks := []struct {
+        desc     string
+        dueDate  time.Time
+        priority Priority
+        completed bool
+    }{
+        {"Today early", today.Add(2 * time.Hour), PriorityMedium, false},
+        {"Today late", today.Add(23 * time.Hour), PriorityHigh, false},
+        {"Tomorrow", today.AddDate(0, 0, 1), PriorityHigh, false},
+        {"Future task", today.AddDate(0, 0, 3), PriorityLow, false},
+        {"Completed task", today.AddDate(0, 0, 2), PriorityMedium, true},
+        {"Past task", today.AddDate(0, 0, -1), PriorityHigh, false},
+        {"Edge case task", today.AddDate(0, 0, 7), PriorityMedium, false},
+        {"No date task", time.Time{}, PriorityLow, false},
+        {"Next week task", today.AddDate(0, 0, 8), PriorityLow, false},
+    }
+    
+    // Добавляем задачи
+    for _, tt := range testTasks {
+        id, _ := tm.AddTask(tt.desc)
+        tm.UpdateTask(id, UpdateTaskRequest{
+            DueDate:  &tt.dueDate,
+            Priority: &tt.priority,
+            Completed: &tt.completed,
+        })
+    }
+    
+    // Тестируем
+    tests := []struct {
+        name string
+        days int
+        want []string
+    }{
+        {
+            name: "Today only",
+            days: 0,
+            want: []string{"Today early", "Today late"},
+        },
+        {
+            name: "Next 3 days",
+            days: 3,
+            want: []string{"Today early", "Today late", "Tomorrow", "Future task"},
+        },
+        {
+            name: "Next week",
+            days: 7,
+            want: []string{"Today early", "Today late", "Tomorrow", "Future task", "Edge case task"},
+        },
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got := tm.GetUpcomingTasks(tt.days)
+            
+            // Проверяем количество задач
+            if len(got) != len(tt.want) {
+                t.Errorf("GetUpcomingTasks() returned %d tasks (%v), want %d (%v)", 
+                    len(got), getTaskDescriptions(got), len(tt.want), tt.want)
+                return
+            }
+            
+            // Проверяем порядок и содержание задач
+            for i := range got {
+                if got[i].Description != tt.want[i] {
+                    t.Errorf("Position %d: got %q, want %q", 
+                        i, got[i].Description, tt.want[i])
+                }
+            }
+        })
+    }
+}
+
+// Вспомогательная функция для получения списка описаний задач
+func getTaskDescriptions(tasks []Task) []string {
+    descs := make([]string, len(tasks))
+    for i, task := range tasks {
+        descs[i] = task.Description
+    }
+    return descs
+}

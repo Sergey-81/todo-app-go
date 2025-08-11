@@ -287,26 +287,40 @@ func (tm *TaskManager) FilterByPriority(priority Priority) []Task {
 }
 
 func (tm *TaskManager) GetUpcomingTasks(days int) []Task {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
+    tm.mu.Lock()
+    defer tm.mu.Unlock()
 
-	now := time.Now()
-	limit := now.AddDate(0, 0, days)
-	tasks := make([]Task, 0)
-	
-	for _, task := range tm.tasks {
-		if !task.DueDate.IsZero() && 
-		   task.DueDate.After(now) && 
-		   task.DueDate.Before(limit) && 
-		   !task.Completed {
-			tasks = append(tasks, task)
-		}
-	}
-	
-	// Сортируем по дате выполнения (ближайшие сначала)
-	sort.Slice(tasks, func(i, j int) bool {
-		return tasks[i].DueDate.Before(tasks[j].DueDate)
-	})
-	
-	return tasks
+    now := time.Now()
+    today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+    endDate := today.AddDate(0, 0, days+1) // Добавляем +1 день чтобы включить последний день
+    
+    tasks := make([]Task, 0)
+    
+    for _, task := range tm.tasks {
+        // Пропускаем задачи без DueDate или выполненные
+        if task.DueDate.IsZero() || task.Completed {
+            continue
+        }
+        
+        // Нормализуем дату задачи (без времени)
+        taskDate := time.Date(
+            task.DueDate.Year(),
+            task.DueDate.Month(),
+            task.DueDate.Day(),
+            0, 0, 0, 0,
+            task.DueDate.Location(),
+        )
+        
+        // Включаем задачи, у которых DueDate начиная с сегодня и до endDate
+        if taskDate.After(today.Add(-time.Nanosecond)) && taskDate.Before(endDate) {
+            tasks = append(tasks, task)
+        }
+    }
+    
+    // Сортируем по дате выполнения
+    sort.Slice(tasks, func(i, j int) bool {
+        return tasks[i].DueDate.Before(tasks[j].DueDate)
+    })
+    
+    return tasks
 }
