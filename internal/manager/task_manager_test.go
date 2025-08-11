@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	//"todo-app/internal/logger"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -27,17 +26,22 @@ func TestAddTask(t *testing.T) {
 	tm := NewTaskManager()
 
 	t.Run("Успешное добавление задачи", func(t *testing.T) {
-		id, err := tm.AddTask("Новая задача")
+		id, err := tm.AddTask("Новая задача", []string{"тег1", "тег2"})
 		if err != nil {
 			t.Fatalf("Ошибка при добавлении задачи: %v", err)
 		}
 		if id != 1 {
 			t.Errorf("Ожидался ID=1, получен %d", id)
 		}
+		
+		task, _ := tm.GetTask(id)
+		if len(task.Tags) != 2 {
+			t.Errorf("Ожидалось 2 тега, получено %d", len(task.Tags))
+		}
 	})
 
 	t.Run("Пустое описание задачи", func(t *testing.T) {
-		_, err := tm.AddTask("")
+		_, err := tm.AddTask("", nil)
 		if err == nil {
 			t.Error("Ожидалась ошибка при пустом описании")
 		}
@@ -45,16 +49,43 @@ func TestAddTask(t *testing.T) {
 
 	t.Run("Слишком длинное описание", func(t *testing.T) {
 		longDesc := strings.Repeat("a", 1001)
-		_, err := tm.AddTask(longDesc)
+		_, err := tm.AddTask(longDesc, nil)
 		if err == nil {
 			t.Error("Ожидалась ошибка при слишком длинном описании")
+		}
+	})
+
+	t.Run("Нормализация тегов", func(t *testing.T) {
+		id, _ := tm.AddTask("Задача", []string{" ТЕГ1 ", " тег1 ", "тег2", "", "  "})
+		task, _ := tm.GetTask(id)
+		
+		if len(task.Tags) != 2 {
+			t.Errorf("Ожидалось 2 уникальных тега после нормализации, получено %d: %v", 
+				len(task.Tags), task.Tags)
+		}
+		
+		// Проверяем что теги нормализованы (пробелы убраны)
+		for _, tag := range task.Tags {
+			if strings.Contains(tag, " ") {
+				t.Errorf("Тег содержит пробелы: '%s'", tag)
+			}
+		}
+	})
+
+	t.Run("Нормализация регистра тегов", func(t *testing.T) {
+		id, _ := tm.AddTask("Задача", []string{"Тег", "тег", "ТЕГ"})
+		task, _ := tm.GetTask(id)
+		
+		if len(task.Tags) != 1 {
+			t.Errorf("Ожидалось 1 уникальный тег (регистронезависимый), получено %d: %v", 
+				len(task.Tags), task.Tags)
 		}
 	})
 }
 
 func TestUpdateTask(t *testing.T) {
 	tm := NewTaskManager()
-	id, _ := tm.AddTask("Исходная задача")
+	id, _ := tm.AddTask("Исходная задача", nil)
 
 	t.Run("Обновление только описания", func(t *testing.T) {
 		newDesc := "Новое описание"
@@ -64,6 +95,17 @@ func TestUpdateTask(t *testing.T) {
 		}
 		if updated.Description != newDesc {
 			t.Errorf("Описание не обновилось, ожидалось '%s', получено '%s'", newDesc, updated.Description)
+		}
+	})
+
+	t.Run("Обновление тегов", func(t *testing.T) {
+		newTags := []string{"новый", "тег"}
+		updated, err := tm.UpdateTask(id, UpdateTaskRequest{Tags: &newTags})
+		if err != nil {
+			t.Fatalf("Ошибка при обновлении тегов: %v", err)
+		}
+		if len(updated.Tags) != 2 {
+			t.Errorf("Ожидалось 2 тега, получено %d", len(updated.Tags))
 		}
 	})
 
@@ -104,7 +146,7 @@ func TestUpdateTask(t *testing.T) {
 
 func TestDeleteTask(t *testing.T) {
 	tm := NewTaskManager()
-	id, _ := tm.AddTask("Задача для удаления")
+	id, _ := tm.AddTask("Задача для удаления", nil)
 
 	t.Run("Успешное удаление", func(t *testing.T) {
 		err := tm.DeleteTask(id)
@@ -123,7 +165,7 @@ func TestDeleteTask(t *testing.T) {
 
 func TestGetTask(t *testing.T) {
 	tm := NewTaskManager()
-	id, _ := tm.AddTask("Тестовая задача")
+	id, _ := tm.AddTask("Тестовая задача", []string{"тест"})
 
 	t.Run("Получение существующей задачи", func(t *testing.T) {
 		task, err := tm.GetTask(id)
@@ -135,6 +177,9 @@ func TestGetTask(t *testing.T) {
 		}
 		if task.Description != "Тестовая задача" {
 			t.Errorf("Ожидалось описание 'Тестовая задача', получено '%s'", task.Description)
+		}
+		if len(task.Tags) != 1 || task.Tags[0] != "тест" {
+			t.Errorf("Ожидался тег 'тест', получено %v", task.Tags)
 		}
 	})
 
@@ -157,8 +202,8 @@ func TestGetAllTasks(t *testing.T) {
 	})
 
 	t.Run("Список с задачами", func(t *testing.T) {
-		tm.AddTask("Задача 1")
-		tm.AddTask("Задача 2")
+		tm.AddTask("Задача 1", []string{"тег1"})
+		tm.AddTask("Задача 2", []string{"тег2"})
 		tasks := tm.GetAllTasks()
 		if len(tasks) != 2 {
 			t.Errorf("Ожидалось 2 задачи, получено %d", len(tasks))
@@ -175,7 +220,7 @@ func TestConcurrentAccess(t *testing.T) {
 	for i := 0; i < count; i++ {
 		go func() {
 			defer wg.Done()
-			_, _ = tm.AddTask("Конкурентная задача")
+			_, _ = tm.AddTask("Конкурентная задача", nil)
 		}()
 	}
 	wg.Wait()
@@ -187,7 +232,7 @@ func TestConcurrentAccess(t *testing.T) {
 
 func TestToggleComplete(t *testing.T) {
 	tm := NewTaskManager()
-	id, _ := tm.AddTask("Тестовая задача")
+	id, _ := tm.AddTask("Тестовая задача", nil)
 
 	t.Run("Переключение с false на true", func(t *testing.T) {
 		task, err := tm.ToggleComplete(id)
@@ -233,7 +278,7 @@ func TestToggleComplete(t *testing.T) {
 
 func TestConcurrentToggle(t *testing.T) {
 	tm := NewTaskManager()
-	id, _ := tm.AddTask("Конкурентное переключение")
+	id, _ := tm.AddTask("Конкурентное переключение", nil)
 	var wg sync.WaitGroup
 	iterations := 100
 
@@ -260,7 +305,7 @@ func TestMetrics(t *testing.T) {
 	tm := NewTaskManager()
 
 	t.Run("Метрики AddTask", func(t *testing.T) {
-		_, err := tm.AddTask("Тестовая задача")
+		_, err := tm.AddTask("Тестовая задача", nil)
 		if err != nil {
 			t.Fatalf("Ошибка при добавлении задачи: %v", err)
 		}
@@ -269,7 +314,7 @@ func TestMetrics(t *testing.T) {
 			t.Errorf("AddTaskCount success = %v, want 1", got)
 		}
 
-		_, err = tm.AddTask("")
+		_, err = tm.AddTask("", nil)
 		if err == nil {
 			t.Error("Ожидалась ошибка при пустом описании")
 		}
@@ -280,7 +325,7 @@ func TestMetrics(t *testing.T) {
 	})
 
 	t.Run("Метрики UpdateTask", func(t *testing.T) {
-		id, _ := tm.AddTask("Тестовая задача")
+		id, _ := tm.AddTask("Тестовая задача", nil)
 
 		completed := true
 		_, err := tm.UpdateTask(id, UpdateTaskRequest{Completed: &completed})
@@ -303,7 +348,7 @@ func TestMetrics(t *testing.T) {
 	})
 
 	t.Run("Метрики DeleteTask", func(t *testing.T) {
-		id, _ := tm.AddTask("Тестовая задача")
+		id, _ := tm.AddTask("Тестовая задача", nil)
 
 		err := tm.DeleteTask(id)
 		if err != nil {
@@ -325,7 +370,7 @@ func TestMetrics(t *testing.T) {
 	})
 
 	t.Run("Метрики ToggleComplete", func(t *testing.T) {
-		id, _ := tm.AddTask("Тестовая задача для toggle")
+		id, _ := tm.AddTask("Тестовая задача для toggle", nil)
 
 		_, err := tm.ToggleComplete(id)
 		if err != nil {
@@ -352,44 +397,42 @@ func TestMetrics(t *testing.T) {
 }
 
 func TestFilterTasks(t *testing.T) {
-    tm := NewTaskManager()
-    tm.AddTask("Активная задача")
-    completedID, _ := tm.AddTask("Выполненная задача")
-    tm.ToggleComplete(completedID)
+	tm := NewTaskManager()
+	tm.AddTask("Активная задача", nil)
+	completedID, _ := tm.AddTask("Выполненная задача", nil)
+	tm.ToggleComplete(completedID)
 
-    t.Run("Фильтр Все", func(t *testing.T) {
-        tasks := tm.FilterTasks(nil)
-        if len(tasks) != 2 {
-            t.Errorf("Ожидалось 2 задачи, получено %d", len(tasks))
-        }
-    })
+	t.Run("Фильтр Все", func(t *testing.T) {
+		tasks := tm.FilterTasks(nil)
+		if len(tasks) != 2 {
+			t.Errorf("Ожидалось 2 задачи, получено %d", len(tasks))
+		}
+	})
 
-    t.Run("Фильтр Выполненные", func(t *testing.T) {
-        completed := true
-        tasks := tm.FilterTasks(&completed)
-        if len(tasks) != 1 || !tasks[0].Completed {
-            t.Error("Ожидалась 1 выполненная задача")
-        }
-    })
+	t.Run("Фильтр Выполненные", func(t *testing.T) {
+		completed := true
+		tasks := tm.FilterTasks(&completed)
+		if len(tasks) != 1 || !tasks[0].Completed {
+			t.Error("Ожидалась 1 выполненная задача")
+		}
+	})
 
-    t.Run("Фильтр Активные", func(t *testing.T) {
-        active := false
-        tasks := tm.FilterTasks(&active)
-        if len(tasks) != 1 || tasks[0].Completed {
-            t.Error("Ожидалась 1 активная задача")
-        }
-    })
+	t.Run("Фильтр Активные", func(t *testing.T) {
+		active := false
+		tasks := tm.FilterTasks(&active)
+		if len(tasks) != 1 || tasks[0].Completed {
+			t.Error("Ожидалась 1 активная задача")
+		}
+	})
 }
 
 func TestFilterByPriority(t *testing.T) {
 	tm := NewTaskManager()
 	
-	// Добавляем задачи с разными приоритетами
-	lowID, _ := tm.AddTask("Низкий приоритет")
-	medID, _ := tm.AddTask("Средний приоритет")
-	highID, _ := tm.AddTask("Высокий приоритет")
+	lowID, _ := tm.AddTask("Низкий приоритет", nil)
+	medID, _ := tm.AddTask("Средний приоритет", nil)
+	highID, _ := tm.AddTask("Высокий приоритет", nil)
 	
-	// Обновляем приоритеты (исправляем проблему с адресом констант)
 	lowPriority := PriorityLow
 	medPriority := PriorityMedium
 	highPriority := PriorityHigh
@@ -436,89 +479,160 @@ func TestFilterByPriority(t *testing.T) {
 	})
 }
 
-func TestGetUpcomingTasks(t *testing.T) {
-    tm := NewTaskManager()
-    now := time.Now()
-    today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-    
-    // Подготовка тестовых данных с явными датами
-    testTasks := []struct {
-        desc     string
-        dueDate  time.Time
-        priority Priority
-        completed bool
-    }{
-        {"Today early", today.Add(2 * time.Hour), PriorityMedium, false},
-        {"Today late", today.Add(23 * time.Hour), PriorityHigh, false},
-        {"Tomorrow", today.AddDate(0, 0, 1), PriorityHigh, false},
-        {"Future task", today.AddDate(0, 0, 3), PriorityLow, false},
-        {"Completed task", today.AddDate(0, 0, 2), PriorityMedium, true},
-        {"Past task", today.AddDate(0, 0, -1), PriorityHigh, false},
-        {"Edge case task", today.AddDate(0, 0, 7), PriorityMedium, false},
-        {"No date task", time.Time{}, PriorityLow, false},
-        {"Next week task", today.AddDate(0, 0, 8), PriorityLow, false},
-    }
-    
-    // Добавляем задачи
-    for _, tt := range testTasks {
-        id, _ := tm.AddTask(tt.desc)
-        tm.UpdateTask(id, UpdateTaskRequest{
-            DueDate:  &tt.dueDate,
-            Priority: &tt.priority,
-            Completed: &tt.completed,
-        })
-    }
-    
-    // Тестируем
-    tests := []struct {
-        name string
-        days int
-        want []string
-    }{
-        {
-            name: "Today only",
-            days: 0,
-            want: []string{"Today early", "Today late"},
-        },
-        {
-            name: "Next 3 days",
-            days: 3,
-            want: []string{"Today early", "Today late", "Tomorrow", "Future task"},
-        },
-        {
-            name: "Next week",
-            days: 7,
-            want: []string{"Today early", "Today late", "Tomorrow", "Future task", "Edge case task"},
-        },
-    }
-    
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            got := tm.GetUpcomingTasks(tt.days)
-            
-            // Проверяем количество задач
-            if len(got) != len(tt.want) {
-                t.Errorf("GetUpcomingTasks() returned %d tasks (%v), want %d (%v)", 
-                    len(got), getTaskDescriptions(got), len(tt.want), tt.want)
-                return
-            }
-            
-            // Проверяем порядок и содержание задач
-            for i := range got {
-                if got[i].Description != tt.want[i] {
-                    t.Errorf("Position %d: got %q, want %q", 
-                        i, got[i].Description, tt.want[i])
-                }
-            }
-        })
-    }
+func TestFilterByTag(t *testing.T) {
+	tm := NewTaskManager()
+	
+	tm.AddTask("Задача 1", []string{"тег1"})
+	tm.AddTask("Задача 2", []string{"тег2"})
+	tm.AddTask("Задача 3", []string{"тег1", "тег2"})
+	tm.AddTask("Задача 4", []string{"ТеГ1"}) // Тест на регистронезависимость
+	
+	t.Run("Фильтр по тегу1", func(t *testing.T) {
+		tasks := tm.FilterByTag("тег1")
+		if len(tasks) != 3 {
+			t.Errorf("Ожидалось 3 задачи с тегом 'тег1', получено %d", len(tasks))
+		}
+	})
+	
+	t.Run("Фильтр по тегу2", func(t *testing.T) {
+		tasks := tm.FilterByTag("тег2")
+		if len(tasks) != 2 {
+			t.Errorf("Ожидалось 2 задачи с тегом 'тег2', получено %d", len(tasks))
+		}
+	})
+	
+	t.Run("Фильтр по несуществующему тегу", func(t *testing.T) {
+		tasks := tm.FilterByTag("тег3")
+		if len(tasks) != 0 {
+			t.Errorf("Ожидалось 0 задач, получено %d", len(tasks))
+		}
+	})
+	
+	t.Run("Регистронезависимый поиск", func(t *testing.T) {
+		tasks := tm.FilterByTag("ТЕГ1")
+		if len(tasks) != 3 {
+			t.Errorf("Ожидалось 3 задачи при регистронезависимом поиске, получено %d", len(tasks))
+		}
+	})
 }
 
-// Вспомогательная функция для получения списка описаний задач
+func TestGetUpcomingTasks(t *testing.T) {
+	tm := NewTaskManager()
+	now := time.Now()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	
+	testTasks := []struct {
+		desc     string
+		dueDate  time.Time
+		priority Priority
+		completed bool
+	}{
+		{"Today early", today.Add(2 * time.Hour), PriorityMedium, false},
+		{"Today late", today.Add(23 * time.Hour), PriorityHigh, false},
+		{"Tomorrow", today.AddDate(0, 0, 1), PriorityHigh, false},
+		{"Future task", today.AddDate(0, 0, 3), PriorityLow, false},
+		{"Completed task", today.AddDate(0, 0, 2), PriorityMedium, true},
+		{"Past task", today.AddDate(0, 0, -1), PriorityHigh, false},
+		{"Edge case task", today.AddDate(0, 0, 7), PriorityMedium, false},
+		{"No date task", time.Time{}, PriorityLow, false},
+		{"Next week task", today.AddDate(0, 0, 8), PriorityLow, false},
+	}
+	
+	for _, tt := range testTasks {
+		id, _ := tm.AddTask(tt.desc, nil)
+		tm.UpdateTask(id, UpdateTaskRequest{
+			DueDate:  &tt.dueDate,
+			Priority: &tt.priority,
+			Completed: &tt.completed,
+		})
+	}
+	
+	tests := []struct {
+		name string
+		days int
+		want []string
+	}{
+		{
+			name: "Today only",
+			days: 0,
+			want: []string{"Today early", "Today late"},
+		},
+		{
+			name: "Next 3 days",
+			days: 3,
+			want: []string{"Today early", "Today late", "Tomorrow", "Future task"},
+		},
+		{
+			name: "Next week",
+			days: 7,
+			want: []string{"Today early", "Today late", "Tomorrow", "Future task", "Edge case task"},
+		},
+	}
+	
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tm.GetUpcomingTasks(tt.days)
+			
+			if len(got) != len(tt.want) {
+				t.Errorf("GetUpcomingTasks() returned %d tasks (%v), want %d (%v)", 
+					len(got), getTaskDescriptions(got), len(tt.want), tt.want)
+				return
+			}
+			
+			for i := range got {
+				if got[i].Description != tt.want[i] {
+					t.Errorf("Position %d: got %q, want %q", 
+						i, got[i].Description, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 func getTaskDescriptions(tasks []Task) []string {
-    descs := make([]string, len(tasks))
-    for i, task := range tasks {
-        descs[i] = task.Description
+	descs := make([]string, len(tasks))
+	for i, task := range tasks {
+		descs[i] = task.Description
+	}
+	return descs
+}
+
+func TestGetAllTags(t *testing.T) {
+    tm := NewTaskManager()
+
+    // Добавляем задачи с тегами (включая разные регистры)
+    tm.AddTask("Задача 1", []string{"тег1", "тег2"})
+    tm.AddTask("Задача 2", []string{"ТЕГ2", "тег3"})
+    tm.AddTask("Задача 3", []string{"ТеГ1", "тег4"})
+
+    // Получаем все уникальные теги (должны быть нормализованы)
+    tags := tm.GetAllTags()
+
+    // Ожидаемые теги (в нижнем регистре)
+    expectedTags := []string{"тег1", "тег2", "тег3", "тег4"}
+    
+    // Проверка количества
+    if len(tags) != len(expectedTags) {
+        t.Fatalf("Ожидалось %d уникальных тегов, получено %d: %v", 
+            len(expectedTags), len(tags), tags)
     }
-    return descs
+
+    // Проверка наличия всех тегов
+    tagMap := make(map[string]bool)
+    for _, tag := range tags {
+        tagMap[tag] = true
+    }
+
+    for _, expectedTag := range expectedTags {
+        if !tagMap[expectedTag] {
+            t.Errorf("Отсутствует ожидаемый тег: %s", expectedTag)
+        }
+    }
+
+    // Проверка сортировки
+    for i := 0; i < len(tags)-1; i++ {
+        if tags[i] > tags[i+1] {
+            t.Errorf("Теги не отсортированы: %s > %s", tags[i], tags[i+1])
+        }
+    }
 }
