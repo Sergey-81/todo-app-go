@@ -1,320 +1,292 @@
 package main
 
 import (
-	"context"
-	"html/template"
-	"net/http"
+	"flag"
+	"fmt"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
-	"time"
-	"sort"
-
-	"github.com/go-chi/chi/v5"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"todo-app/internal/logger"
 	"todo-app/internal/manager"
+	"todo-app/internal/models"
 )
 
-type TemplateData struct {
-	Tasks []manager.Task
-}
-
-var templateFuncs = template.FuncMap{
-	"now": time.Now,
-	"daysLeft": func(dueDate time.Time) int {
-		return int(time.Until(dueDate).Hours() / 24)
-	},
-	"getPopularTags": func(tasks []manager.Task) []string {
-		tagCounts := make(map[string]int)
-		for _, task := range tasks {
-			for _, tag := range task.Tags {
-				tagCounts[tag]++
-			}
-		}
-		var popular []string
-		for tag := range tagCounts {
-			popular = append(popular, tag)
-		}
-		sort.Slice(popular, func(i, j int) bool {
-			return tagCounts[popular[i]] > tagCounts[popular[j]]
-		})
-		if len(popular) > 5 {
-			return popular[:5]
-		}
-		return popular
-	},
-}
-
-func printWelcomeMessage() {
-	println(`
-🚀 Todo-App Server
------------------------------
-Available endpoints:
-  POST   /tasks          - Add new task
-  POST   /tasks/toggle/{id} - Toggle task completion
-  POST   /tasks/update/{id} - Update task
-  POST   /tasks/delete/{id} - Delete task
-  GET    /tasks/filter/{status} - Filter tasks (all/completed/active)
-  GET    /tasks/priority/{priority} - Filter by priority (low/medium/high)
-  GET    /tasks/tag/{tag} - Filter by tag
-  GET    /tasks/upcoming/{days} - Upcoming tasks (within days)
-  GET    /               - Web Interface (:8080)
-  GET    /metrics        - Prometheus metrics
------------------------------
-Storage type: In-Memory
-Start time: ` + time.Now().Format("2006-01-02 15:04:05") + `
------------------------------
-`)
-}
+const (
+	storageFileJSON = "tasks.json"
+	storageFileCSV  = "tasks.csv"
+)
 
 func main() {
-	ctx := context.Background()
-	logger.SetLevel(logger.LevelInfo)
-	printWelcomeMessage()
-	logger.Info(ctx, "Starting todo-app server...")
+	if len(os.Args) < 2 {
+		printHelp()
+		os.Exit(1)
+	}
 
 	tm := manager.NewTaskManager()
-	r := chi.NewRouter()
-	setupRoutes(r, tm)
-
-	server := &http.Server{
-		Addr:    ":8080",
-		Handler: r,
+	if err := loadInitialTasks(tm); err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading tasks: %v\n", err)
+		os.Exit(1)
 	}
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		logger.Info(ctx, "Server started on http://localhost:8080")
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error(ctx, err, "Server error")
-			quit <- syscall.SIGTERM
-		}
-	}()
-
-	<-quit
-	logger.Info(ctx, "Shutting down server...")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := server.Shutdown(ctx); err != nil {
-		logger.Error(ctx, err, "Server shutdown error")
+	command := os.Args[1]
+	switch command {
+	case "add":
+		handleAddCommand(tm)
+	case "list":
+		handleListCommand(tm)
+	case "complete":
+		handleCompleteCommand(tm)
+	case "delete":
+		handleDeleteCommand(tm)
+	case "export":
+		handleExportCommand(tm)
+	case "load":
+		handleLoadCommand(tm)
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown command: %s\n", command)
+		printHelp()
+		os.Exit(1)
 	}
-	logger.Info(ctx, "Server stopped")
 }
 
-func setupRoutes(r *chi.Mux, tm *manager.TaskManager) {
-	r.Handle("/metrics", promhttp.Handler())
+func loadInitialTasks(tm *manager.TaskManager) error {
+	// Попробуем загрузить из JSON
+	tasks, err := models.LoadJSON(storageFileJSON)
+	if err != nil {
+		return err
+	}
 
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
-		data := TemplateData{
-			Tasks: tm.GetAllTasks(),
-		}
-		tmpl.Execute(w, data)
-	})
-
-	r.Get("/tasks/filter/{status}", func(w http.ResponseWriter, r *http.Request) {
-		status := chi.URLParam(r, "status")
-		var completed *bool
-		switch status {
-		case "completed":
-			val := true
-			completed = &val
-		case "active":
-			val := false
-			completed = &val
-		case "all":
-			completed = nil
-		default:
-			http.Error(w, "Недопустимый статус фильтра", http.StatusBadRequest)
-			return
-		}
-		tasks := tm.FilterTasks(completed)
-		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
-		tmpl.Execute(w, TemplateData{Tasks: tasks})
-	})
-
-	r.Get("/tasks/priority/{priority}", func(w http.ResponseWriter, r *http.Request) {
-		priority := manager.Priority(chi.URLParam(r, "priority"))
-		if priority != manager.PriorityLow && 
-		   priority != manager.PriorityMedium && 
-		   priority != manager.PriorityHigh {
-			http.Error(w, "Недопустимый приоритет", http.StatusBadRequest)
-			return
-		}
-		tasks := tm.FilterByPriority(priority)
-		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
-		tmpl.Execute(w, TemplateData{Tasks: tasks})
-	})
-
-	r.Get("/tasks/tag/{tag}", func(w http.ResponseWriter, r *http.Request) {
-		tag := chi.URLParam(r, "tag")
-		tasks := tm.FilterByTag(tag)
-		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
-		tmpl.Execute(w, TemplateData{Tasks: tasks})
-	})
-
-	r.Get("/tasks/upcoming/{days}", func(w http.ResponseWriter, r *http.Request) {
-		daysStr := chi.URLParam(r, "days")
-		days, err := strconv.Atoi(daysStr)
-		if err != nil || days < 1 {
-			http.Error(w, "Недопустимое количество дней", http.StatusBadRequest)
-			return
-		}
-		tasks := tm.GetUpcomingTasks(days)
-		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
-		tmpl.Execute(w, TemplateData{Tasks: tasks})
-	})
-
-	r.Post("/tasks", func(w http.ResponseWriter, r *http.Request) {
-		startTime := time.Now()
-		description := r.FormValue("description")
-		priority := manager.Priority(r.FormValue("priority"))
-		dueDateStr := r.FormValue("due_date")
-		tagsStr := r.FormValue("tags")
-		
-		if description == "" {
-			manager.AddTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, "Описание задачи обязательно", http.StatusBadRequest)
-			return
-		}
-
-		if priority != manager.PriorityLow && 
-		   priority != manager.PriorityMedium && 
-		   priority != manager.PriorityHigh {
-			priority = manager.PriorityMedium
-		}
-
-		var dueDate time.Time
-		if dueDateStr != "" {
-			var err error
-			dueDate, err = time.Parse("2006-01-02", dueDateStr)
-			if err != nil {
-				http.Error(w, "Некорректная дата выполнения", http.StatusBadRequest)
-				return
-			}
-		}
-
-		var tags []string
-		if tagsStr != "" {
-			tags = strings.Split(tagsStr, ",")
-			for i := range tags {
-				tags[i] = strings.TrimSpace(tags[i])
-			}
-		}
-
-		taskID, err := tm.AddTask(description, tags)
+	if len(tasks) == 0 {
+		// Если в JSON нет задач, попробуем CSV
+		tasks, err = models.LoadCSV(storageFileCSV)
 		if err != nil {
-			manager.AddTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
+			return err
 		}
+	}
 
-		_, err = tm.UpdateTask(taskID, manager.UpdateTaskRequest{
-			Priority: &priority,
-			DueDate:  &dueDate,
-		})
+	for _, task := range tasks {
+		// В реальном приложении нужно обновить nextID в TaskManager
+		// Здесь упрощённая логика для примера
+		_, err := tm.AddTask(task.Description, task.Tags)
 		if err != nil {
-			manager.AddTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+			return err
 		}
+	}
 
-		manager.AddTaskCount.WithLabelValues("success").Inc()
-		manager.AddTaskDuration.Observe(time.Since(startTime).Seconds())
-		manager.TaskDescLength.Observe(float64(len(description)))
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-	})
+	return nil
+}
 
-	r.Post("/tasks/toggle/{id}", func(w http.ResponseWriter, r *http.Request) {
-		startTime := time.Now()
-		idStr := chi.URLParam(r, "id")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			manager.UpdateTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
-			return
-		}
-		_, err = tm.ToggleComplete(id)
-		if err != nil {
-			manager.UpdateTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		manager.UpdateTaskCount.WithLabelValues("success").Inc()
-		manager.UpdateTaskDuration.Observe(time.Since(startTime).Seconds())
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-	})
+func handleAddCommand(tm *manager.TaskManager) {
+	addCmd := flag.NewFlagSet("add", flag.ExitOnError)
+	desc := addCmd.String("desc", "", "Task description")
+	tags := addCmd.String("tags", "", "Comma-separated list of tags")
+	addCmd.Parse(os.Args[2:])
 
-	r.Post("/tasks/update/{id}", func(w http.ResponseWriter, r *http.Request) {
-		startTime := time.Now()
-		idStr := chi.URLParam(r, "id")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			manager.UpdateTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
-			return
-		}
-		description := r.FormValue("description")
-		if description == "" {
-			manager.UpdateTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, "Описание задачи обязательно", http.StatusBadRequest)
-			return
-		}
-		priority := manager.Priority(r.FormValue("priority"))
-		dueDateStr := r.FormValue("due_date")
-		tagsStr := r.FormValue("tags")
-		var dueDate time.Time
-		if dueDateStr != "" {
-			dueDate, err = time.Parse("2006-01-02", dueDateStr)
-			if err != nil {
-				http.Error(w, "Некорректная дата выполнения", http.StatusBadRequest)
-				return
-			}
-		}
-		var tags []string
-		if tagsStr != "" {
-			tags = strings.Split(tagsStr, ",")
-			for i := range tags {
-				tags[i] = strings.TrimSpace(tags[i])
-			}
-		}
-		_, err = tm.UpdateTask(id, manager.UpdateTaskRequest{
-			Description: &description,
-			Priority:    &priority,
-			DueDate:     &dueDate,
-			Tags:        &tags,
-		})
-		if err != nil {
-			manager.UpdateTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		manager.UpdateTaskCount.WithLabelValues("success").Inc()
-		manager.UpdateTaskDuration.Observe(time.Since(startTime).Seconds())
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-	})
+	if *desc == "" {
+		fmt.Fprintln(os.Stderr, "Error: --desc is required")
+		os.Exit(1)
+	}
 
-	r.Post("/tasks/delete/{id}", func(w http.ResponseWriter, r *http.Request) {
-		startTime := time.Now()
-		idStr := chi.URLParam(r, "id")
-		id, err := strconv.Atoi(idStr)
+	var tagList []string
+	if *tags != "" {
+		tagList = strings.Split(*tags, ",")
+		for i := range tagList {
+			tagList[i] = strings.TrimSpace(tagList[i])
+		}
+	}
+
+	id, err := tm.AddTask(*desc, tagList)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error adding task: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := saveTasks(tm); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving tasks: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Added task with ID %d\n", id)
+}
+
+func handleListCommand(tm *manager.TaskManager) {
+	listCmd := flag.NewFlagSet("list", flag.ExitOnError)
+	filter := listCmd.String("filter", "all", "Filter tasks (all|completed|pending)")
+	listCmd.Parse(os.Args[2:])
+
+	var completed *bool
+	switch *filter {
+	case "completed":
+		val := true
+		completed = &val
+	case "pending":
+		val := false
+		completed = &val
+	}
+
+	tasks := tm.FilterTasks(completed)
+	if len(tasks) == 0 {
+		fmt.Println("No tasks found")
+		return
+	}
+
+	for _, task := range tasks {
+		status := "Pending"
+		if task.Completed {
+			status = "Completed"
+		}
+		fmt.Printf("%d: %s [%s]\n", task.ID, task.Description, status)
+	}
+}
+
+func handleCompleteCommand(tm *manager.TaskManager) {
+	completeCmd := flag.NewFlagSet("complete", flag.ExitOnError)
+	id := completeCmd.Int("id", 0, "Task ID to complete")
+	completeCmd.Parse(os.Args[2:])
+
+	if *id == 0 {
+		fmt.Fprintln(os.Stderr, "Error: --id is required")
+		os.Exit(1)
+	}
+
+	_, err := tm.ToggleComplete(*id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error completing task: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := saveTasks(tm); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving tasks: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Task %d marked as completed\n", *id)
+}
+
+func handleDeleteCommand(tm *manager.TaskManager) {
+	deleteCmd := flag.NewFlagSet("delete", flag.ExitOnError)
+	id := deleteCmd.Int("id", 0, "Task ID to delete")
+	deleteCmd.Parse(os.Args[2:])
+
+	if *id == 0 {
+		fmt.Fprintln(os.Stderr, "Error: --id is required")
+		os.Exit(1)
+	}
+
+	err := tm.DeleteTask(*id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error deleting task: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := saveTasks(tm); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving tasks: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Task %d deleted\n", *id)
+}
+
+func handleExportCommand(tm *manager.TaskManager) {
+	exportCmd := flag.NewFlagSet("export", flag.ExitOnError)
+	format := exportCmd.String("format", "json", "Export format (json|csv)")
+	outFile := exportCmd.String("out", "", "Output file path")
+	exportCmd.Parse(os.Args[2:])
+
+	if *outFile == "" {
+		fmt.Fprintln(os.Stderr, "Error: --out is required")
+		os.Exit(1)
+	}
+
+	tasks := tm.GetAllTasks()
+	var err error
+
+	switch *format {
+	case "json":
+		err = models.SaveJSON(*outFile, tasks)
+	case "csv":
+		err = models.SaveCSV(*outFile, tasks)
+	default:
+		fmt.Fprintf(os.Stderr, "Error: unsupported format %s\n", *format)
+		os.Exit(1)
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error exporting tasks: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Tasks exported to %s in %s format\n", *outFile, *format)
+}
+
+func handleLoadCommand(tm *manager.TaskManager) {
+	loadCmd := flag.NewFlagSet("load", flag.ExitOnError)
+	file := loadCmd.String("file", "", "File to load tasks from")
+	loadCmd.Parse(os.Args[2:])
+
+	if *file == "" {
+		fmt.Fprintln(os.Stderr, "Error: --file is required")
+		os.Exit(1)
+	}
+
+	var tasks []models.Task
+	var err error
+
+	if strings.HasSuffix(*file, ".json") {
+		tasks, err = models.LoadJSON(*file)
+	} else if strings.HasSuffix(*file, ".csv") {
+		tasks, err = models.LoadCSV(*file)
+	} else {
+		fmt.Fprintln(os.Stderr, "Error: unsupported file format, use .json or .csv")
+		os.Exit(1)
+	}
+
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading tasks: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Очищаем текущие задачи
+	for _, task := range tm.GetAllTasks() {
+		_ = tm.DeleteTask(task.ID)
+	}
+
+	// Добавляем загруженные задачи
+	for _, task := range tasks {
+		_, err := tm.AddTask(task.Description, task.Tags)
 		if err != nil {
-			manager.DeleteTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
-			return
+			fmt.Fprintf(os.Stderr, "Error adding task: %v\n", err)
+			os.Exit(1)
 		}
-		if err := tm.DeleteTask(id); err != nil {
-			manager.DeleteTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		manager.DeleteTaskCount.WithLabelValues("success").Inc()
-		manager.DeleteTaskDuration.Observe(time.Since(startTime).Seconds())
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-	})
+	}
+
+	if err := saveTasks(tm); err != nil {
+		fmt.Fprintf(os.Stderr, "Error saving tasks: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Loaded %d tasks from %s\n", len(tasks), *file)
+}
+
+func saveTasks(tm *manager.TaskManager) error {
+	tasks := tm.GetAllTasks()
+	if err := models.SaveJSON(storageFileJSON, tasks); err != nil {
+		return err
+	}
+	return models.SaveCSV(storageFileCSV, tasks)
+}
+
+func printHelp() {
+	fmt.Println(`Usage: todo <command> [flags]
+
+Commands:
+  add     --desc="..." [--tags="tag1,tag2"]  Add new task
+  list    [--filter=all|completed|pending]   List tasks
+  complete --id=ID                           Mark task as completed
+  delete  --id=ID                            Delete task
+  export  --format=json|csv --out=FILE       Export tasks
+  load    --file=FILE                        Load tasks from file
+
+Storage:
+  Tasks are automatically saved to tasks.json and tasks.csv in the current directory.
+  On startup, the application tries to load tasks from these files.`)
 }
