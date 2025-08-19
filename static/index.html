@@ -37,6 +37,133 @@
         .task-info{display:flex;align-items:center;flex-wrap:wrap;margin-top:5px;}
         .tag{display:inline-block;background:#e0e0e0;padding:2px 8px;border-radius:10px;font-size:0.8em;margin-right:5px;}
         .tags-container{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;}
+        
+        /* Стили для фильтра по дате */
+        .date-filter-container input[type="date"] {
+            position: absolute;
+            opacity: 0;
+            width: 100%;
+            height: 100%;
+            left: 0;
+            top: 0;
+            cursor: pointer;
+        }
+        
+        .date-filter-container input[type="date"]::-webkit-calendar-picker-indicator {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+        }
+        
+        .date-input-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .calendar-icon {
+            position: absolute;
+            right: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0;
+            color: #666;
+            pointer-events: none;
+        }
+        
+        .calendar-icon:hover {
+            color: #2196F3;
+        }
+        
+        /* Стили для подзадач */
+        .subtasks {
+            width: 100%;
+            margin-top: 10px;
+            padding-left: 20px;
+            border-left: 2px solid #ddd;
+        }
+        
+        .subtask {
+            display: flex;
+            align-items: center;
+            margin: 5px 0;
+            padding: 5px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        .subtask.completed {
+            opacity: 0.7;
+        }
+        
+        .subtask.completed .subtask-description {
+            text-decoration: line-through;
+            color: #888;
+        }
+        
+        .subtask-actions {
+            margin-left: auto;
+            display: flex;
+            gap: 5px;
+        }
+        
+        .subtask-input-container {
+            width: 100%;
+            margin-top: 10px;
+            display: flex;
+            gap: 5px;
+        }
+        
+        .subtask-input {
+            flex-grow: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        .add-subtask-btn {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 12px;
+            cursor: pointer;
+        }
+        
+        .add-subtask-btn:hover {
+            background-color: #388E3C;
+        }
+        
+        .toggle-subtasks-btn {
+            background: none;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            font-size: 12px;
+            margin-top: 5px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .toggle-subtasks-btn:hover {
+            color: #2196F3;
+        }
+        
+        .toggle-subtasks-btn::before {
+            content: "▶";
+            font-size: 10px;
+            margin-right: 5px;
+            transition: transform 0.2s;
+        }
+        
+        .toggle-subtasks-btn.expanded::before {
+            transform: rotate(90deg);
+        }
     </style>
 </head>
 <body>
@@ -63,6 +190,31 @@
             <a href="/tasks/priority/high" class="filter-btn">Высокий</a>
         </div>
         <a href="/tasks/upcoming/7" class="filter-btn">На неделе</a>
+        
+        <!-- Фильтр по дате -->
+        <div class="date-filter-container">
+            <form method="GET" action="/tasks/filter/date" class="date-filter-form" id="dateFilterForm">
+                <span>Фильтр по дате:</span>
+                
+                <div class="date-input-wrapper">
+                    <input type="text" name="start" id="startDate" placeholder="дд.мм.гггг" 
+                           pattern="\d{2}\.\d{2}\.\d{4}" title="Формат: дд.мм.гггг">
+                    <button type="button" class="calendar-icon" onclick="showDatePicker('startDate')">📅</button>
+                </div>
+                
+                <span>-</span>
+                
+                <div class="date-input-wrapper">
+                    <input type="text" name="end" id="endDate" placeholder="дд.мм.гггг"
+                           pattern="\d{2}\.\d{2}\.\d{4}" title="Формат: дд.мм.гггг">
+                    <button type="button" class="calendar-icon" onclick="showDatePicker('endDate')">📅</button>
+                </div>
+                
+                <button type="submit" class="filter-btn">Применить</button>
+                <a href="/" class="filter-btn">Сбросить</a>
+            </form>
+        </div>
+        
         {{if gt (len (getPopularTags .Tasks)) 0}}
         <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:10px;width:100%;">
             <strong style="align-self:center;">Теги:</strong>
@@ -95,6 +247,18 @@
                     {{end}}
                 </div>
                 {{end}}
+                
+                <button class="toggle-subtasks-btn" onclick="toggleSubtasks('{{.ID}}')">Подзадачи</button>
+                
+                <div class="subtasks" id="subtasks-{{.ID}}" style="display:none;">
+                    <!-- Подзадачи будут загружены через AJAX -->
+                </div>
+                
+                <div class="subtask-input-container">
+                    <input type="text" class="subtask-input" id="subtask-input-{{.ID}}" placeholder="Добавить подзадачу">
+                    <button class="add-subtask-btn" onclick="addSubtask('{{.ID}}')">Добавить</button>
+                </div>
+                
                 <div class="task-actions">
                     <form method="POST" action="/tasks/toggle/{{.ID}}" style="display:inline;">
                         <button type="submit" class="complete-button">
@@ -125,6 +289,7 @@
     </div>
 
     <script>
+        // Функции для редактирования задач
         function showEditForm(id, description, priority, dueDate, tags) {
             const taskElement = document.getElementById('task-' + id);
             if (!taskElement) return;
@@ -133,7 +298,10 @@
                 taskElement.querySelector('.task-description'),
                 taskElement.querySelector('.task-info'),
                 taskElement.querySelector('.tags-container'),
-                taskElement.querySelector('.task-actions')
+                taskElement.querySelector('.task-actions'),
+                taskElement.querySelector('.toggle-subtasks-btn'),
+                taskElement.querySelector('.subtasks'),
+                taskElement.querySelector('.subtask-input-container')
             ];
             
             elementsToHide.forEach(el => {
@@ -165,19 +333,213 @@
                 taskElement.querySelector('.task-description'),
                 taskElement.querySelector('.task-info'),
                 taskElement.querySelector('.tags-container'),
-                taskElement.querySelector('.task-actions')
+                taskElement.querySelector('.task-actions'),
+                taskElement.querySelector('.toggle-subtasks-btn'),
+                taskElement.querySelector('.subtask-input-container')
             ];
             
             elementsToShow.forEach(el => {
                 if (el) el.style.display = el.classList.contains('tags-container') ? 'flex' : 
-                                          el.classList.contains('task-info') ? 'flex' : 'block';
+                                          el.classList.contains('task-info') ? 'flex' : 
+                                          el.classList.contains('task-actions') ? 'flex' :
+                                          el.classList.contains('subtask-input-container') ? 'flex' : 'block';
             });
             
             const editForm = document.getElementById('edit-form-' + id);
             if (editForm) editForm.style.display = 'none';
         }
 
+        // Функции для фильтра по дате
+        function setupDatePickers() {
+            const startInput = document.getElementById('startDate');
+            const endInput = document.getElementById('endDate');
+            
+            // Создаем скрытые input type="date" для календарей
+            const createDatePicker = (input) => {
+                const wrapper = input.parentNode;
+                const datePicker = document.createElement('input');
+                datePicker.type = 'date';
+                datePicker.title = "Показать окно выбора даты";
+                
+                // Устанавливаем текущее значение
+                if (input.value && input.value.match(/\d{2}\.\d{2}\.\d{4}/)) {
+                    const [day, month, year] = input.value.split('.');
+                    datePicker.value = `${year}-${month}-${day}`;
+                }
+                
+                // Обновляем текстовое поле при выборе даты
+                datePicker.addEventListener('change', function() {
+                    if (this.value) {
+                        const [year, month, day] = this.value.split('-');
+                        input.value = `${day}.${month}.${year}`;
+                    }
+                });
+                
+                wrapper.appendChild(datePicker);
+                
+                // При клике на текстовое поле тоже показываем календарь
+                input.addEventListener('click', function() {
+                    datePicker.click();
+                });
+            };
+            
+            createDatePicker(startInput);
+            createDatePicker(endInput);
+        }
+
+        function setupDateInputs() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const startParam = urlParams.get('start');
+            const endParam = urlParams.get('end');
+
+            const today = new Date();
+            const nextWeek = new Date(today);
+            nextWeek.setDate(today.getDate() + 7);
+
+            const formatToRussian = (date) => {
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                return `${day}.${month}.${date.getFullYear()}`;
+            };
+
+            // Устанавливаем значения по умолчанию или из URL
+            document.getElementById('startDate').value = startParam || formatToRussian(today);
+            document.getElementById('endDate').value = endParam || formatToRussian(nextWeek);
+
+            // Маска ввода для даты
+            ['startDate', 'endDate'].forEach(id => {
+                const input = document.getElementById(id);
+                input.addEventListener('input', function(e) {
+                    let value = this.value.replace(/\D/g, '');
+                    if (value.length > 8) value = value.slice(0, 8);
+                    
+                    let formatted = '';
+                    for (let i = 0; i < value.length; i++) {
+                        if (i === 2 || i === 4) formatted += '.';
+                        formatted += value[i];
+                    }
+                    
+                    this.value = formatted;
+                });
+            });
+        }
+
+        // Функции для работы с подзадачами
+        function toggleSubtasks(taskId) {
+            const subtasksContainer = document.getElementById(`subtasks-${taskId}`);
+            const toggleBtn = document.querySelector(`#task-${taskId} .toggle-subtasks-btn`);
+            
+            if (subtasksContainer.style.display === 'none' || !subtasksContainer.style.display) {
+                // Загружаем подзадачи только при первом открытии
+                if (subtasksContainer.innerHTML.trim() === '') {
+                    loadSubtasks(taskId);
+                }
+                subtasksContainer.style.display = 'block';
+                toggleBtn.classList.add('expanded');
+            } else {
+                subtasksContainer.style.display = 'none';
+                toggleBtn.classList.remove('expanded');
+            }
+        }
+
+        function loadSubtasks(taskId) {
+            fetch(`/tasks/${taskId}/subtasks`)
+                .then(response => {
+                    if (!response.ok) throw new Error('Ошибка загрузки подзадач');
+                    return response.json();
+                })
+                .then(subtasks => {
+                    const container = document.getElementById(`subtasks-${taskId}`);
+                    if (!container) return;
+                    
+                    if (subtasks.length === 0) {
+                        container.innerHTML = '<div style="color:#666;font-size:0.9em;">Нет подзадач</div>';
+                        return;
+                    }
+                    
+                    container.innerHTML = subtasks.map(subtask => `
+                        <div class="subtask ${subtask.completed ? 'completed' : ''}" id="subtask-${subtask.id}">
+                            <input type="checkbox" ${subtask.completed ? 'checked' : ''} 
+                                   onchange="toggleSubtaskStatus(${subtask.id}, ${taskId})">
+                            <span class="subtask-description">${subtask.description}</span>
+                            <div class="subtask-actions">
+                                <button onclick="deleteSubtask(${subtask.id}, ${taskId})" style="background:none;border:none;color:#f44336;cursor:pointer;">🗑️</button>
+                            </div>
+                        </div>
+                    `).join('');
+                })
+                .catch(error => {
+                    console.error('Ошибка загрузки подзадач:', error);
+                    const container = document.getElementById(`subtasks-${taskId}`);
+                    if (container) {
+                        container.innerHTML = '<div style="color:#f44336;font-size:0.9em;">Ошибка загрузки подзадач</div>';
+                    }
+                });
+        }
+
+        function addSubtask(taskId) {
+            const input = document.getElementById(`subtask-input-${taskId}`);
+            const description = input.value.trim();
+            if (!description) return;
+            
+            fetch(`/tasks/${taskId}/subtasks`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `description=${encodeURIComponent(description)}`
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Ошибка добавления подзадачи');
+                input.value = '';
+                return loadSubtasks(taskId);
+            })
+            .catch(error => {
+                console.error('Ошибка:', error);
+                alert('Не удалось добавить подзадачу');
+            });
+        }
+
+        function toggleSubtaskStatus(subtaskId, taskId) {
+            fetch(`/subtasks/${subtaskId}/toggle`, {
+                method: 'POST'
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Ошибка обновления подзадачи');
+                const subtaskElement = document.getElementById(`subtask-${subtaskId}`);
+                if (subtaskElement) {
+                    subtaskElement.classList.toggle('completed');
+                    const description = subtaskElement.querySelector('.subtask-description');
+                    if (description) {
+                        description.style.textDecoration = subtaskElement.classList.contains('completed') ? 'line-through' : 'none';
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Ошибка:', error);
+                alert('Не удалось обновить подзадачу');
+            });
+        }
+
+        function deleteSubtask(subtaskId, taskId) {
+            if (!confirm('Удалить подзадачу?')) return;
+            
+            fetch(`/subtasks/${subtaskId}`, {
+                method: 'DELETE'
+            })
+            .then(response => {
+                if (!response.ok) throw new Error('Ошибка удаления подзадачи');
+                return loadSubtasks(taskId);
+            })
+            .catch(error => {
+                console.error('Ошибка:', error);
+                alert('Не удалось удалить подзадачу');
+            });
+        }
+
+        // Инициализация при загрузке страницы
         document.addEventListener('DOMContentLoaded', function() {
+            // Подсветка активного фильтра
             const path = window.location.pathname;
             const links = document.querySelectorAll('.filter-btn');
             
@@ -185,6 +547,16 @@
                 if (link && path.includes(link.getAttribute('href'))) {
                     link.classList.add('active-filter');
                 }
+            });
+            
+            // Инициализация фильтра по дате
+            setupDateInputs();
+            setupDatePickers();
+            
+            // Обработка формы задачи (чтобы страница не перезагружалась)
+            document.querySelector('.task-form').addEventListener('submit', function(e) {
+                e.preventDefault();
+                this.submit();
             });
         });
     </script>
