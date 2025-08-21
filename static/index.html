@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <title>Todo App</title>
     <style>
-        body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:20px;background-color:#f9f9f9;}
+        body{font-family:Arial,sans-serif;max-width:1000px;margin:0 auto;padding:20px;background-color:#f9f9f9;}
         .task{margin:12px 0;padding:12px;border-left:4px solid #2196F3;background:white;border-radius:4px;box-shadow:0 1px 3px rgba(0,0,0,0.1);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;transition:all 0.3s ease;}
         .task.completed{border-left-color:#4CAF50;opacity:0.7;background-color:#f5f5f5;}
         .task-content{flex-grow:1;margin-right:10px;}
@@ -22,10 +22,6 @@
         .delete-button:hover{background-color:#d32f2f;}
         .task-form{margin-bottom:20px;display:flex;gap:5px;flex-wrap:wrap;}
         .edit-form{display:none;width:100%;margin-top:10px;gap:5px;flex-wrap:wrap;}
-        .filters{margin:15px 0;display:flex;gap:10px;flex-wrap:wrap;}
-        .filter-btn{padding:8px 12px;background:#e0e0e0;border-radius:4px;text-decoration:none;color:#333;transition:background 0.2s;}
-        .filter-btn:hover{background:#d0d0d0;}
-        .active-filter{background:#2196F3;color:white;}
         h1{color:#333;text-align:center;}
         .priority{font-size:0.8em;padding:2px 6px;border-radius:10px;margin-right:8px;color:white;}
         .priority-low{background-color:#4CAF50;}
@@ -37,48 +33,6 @@
         .task-info{display:flex;align-items:center;flex-wrap:wrap;margin-top:5px;}
         .tag{display:inline-block;background:#e0e0e0;padding:2px 8px;border-radius:10px;font-size:0.8em;margin-right:5px;}
         .tags-container{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px;}
-        
-        /* Стили для фильтра по дате */
-        .date-filter-container input[type="date"] {
-            position: absolute;
-            opacity: 0;
-            width: 100%;
-            height: 100%;
-            left: 0;
-            top: 0;
-            cursor: pointer;
-        }
-        
-        .date-filter-container input[type="date"]::-webkit-calendar-picker-indicator {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            opacity: 0;
-            cursor: pointer;
-        }
-        
-        .date-input-wrapper {
-            position: relative;
-            display: inline-block;
-        }
-        
-        .calendar-icon {
-            position: absolute;
-            right: 5px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-size: 16px;
-            padding: 0;
-            color: #666;
-            pointer-events: none;
-        }
-        
-        .calendar-icon:hover {
-            color: #2196F3;
-        }
         
         /* Стили для подзадач */
         .subtasks {
@@ -164,10 +118,151 @@
         .toggle-subtasks-btn.expanded::before {
             transform: rotate(90deg);
         }
+
+        /* Стили для расширенной фильтрации */
+        .advanced-filters {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 2px solid #e9ecef;
+            transition: all 0.3s ease;
+        }
+
+        .advanced-filters.active {
+            border-color: #28a745;
+            background-color: #f0fff4;
+        }
+
+        .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .filter-label {
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+
+        .filter-input {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: white;
+        }
+
+        .date-input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .calendar-icon {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            color: #666;
+            padding: 8px;
+            margin-left: 5px;
+            border-radius: 4px;
+            background: #f0f0f0;
+        }
+
+        .calendar-icon:hover {
+            background: #e0e0e0;
+        }
+
+        .filter-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .quick-filters {
+            display: flex;
+            gap: 10px;
+            margin: 15px 0;
+            flex-wrap: wrap;
+        }
+
+        .quick-filter-btn {
+            padding: 8px 12px;
+            background: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .quick-filter-btn:hover {
+            background: #5a6268;
+        }
+
+        .apply-btn {
+            background: #28a745;
+        }
+
+        .apply-btn:hover {
+            background: #218838;
+        }
+
+        .reset-btn {
+            background: #dc3545;
+        }
+
+        .reset-btn:hover {
+            background: #c82333;
+        }
+
+        .all-tasks-btn {
+            background: #17a2b8;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            padding: 10px 15px;
+        }
+
+        .all-tasks-btn:hover {
+            background: #138496;
+            color: white;
+        }
+
+        /* Стили для отображения подзадач */
+        .subtasks-summary {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .subtasks-progress {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        .progress-text {
+            font-size: 0.8em;
+        }
     </style>
 </head>
 <body>
     <h1>Мои задачи</h1>
+    
+    <!-- Форма добавления задачи -->
     <form class="task-form" method="POST" action="/tasks">
         <input type="text" name="description" placeholder="Новая задача..." required style="flex-grow:1;">
         <select name="priority" style="width:120px;">
@@ -179,118 +274,107 @@
         <input type="text" name="tags" placeholder="теги (через запятую)" style="width:200px;">
         <button id="add-button" type="submit">➕ Добавить</button>
     </form>
-    
-    <div class="filters">
-        <a href="/tasks/filter/all" class="filter-btn">Все задачи</a>
-        <a href="/tasks/filter/active" class="filter-btn">Активные</a>
-        <a href="/tasks/filter/completed" class="filter-btn">Выполненные</a>
-        <div style="display:flex;gap:10px;">
-            <a href="/tasks/priority/low" class="filter-btn">Низкий</a>
-            <a href="/tasks/priority/medium" class="filter-btn">Средний</a>
-            <a href="/tasks/priority/high" class="filter-btn">Высокий</a>
-        </div>
-        <a href="/tasks/upcoming/7" class="filter-btn">На неделе</a>
+
+    <!-- Расширенная фильтрация -->
+    <div class="advanced-filters" id="advancedFilters">
+        <h3 style="margin-top: 0; color: #333; display: flex; align-items: center;">
+            <span style="margin-right: 10px;">🎯</span>Расширенная фильтрация задач
+        </h3>
         
-        <!-- Фильтр по дате -->
-        <div class="date-filter-container">
-            <form method="GET" action="/tasks/filter/date" class="date-filter-form" id="dateFilterForm">
-                <span>Фильтр по дате:</span>
-                
-                <div class="date-input-wrapper">
-                    <input type="text" name="start" id="startDate" placeholder="дд.мм.гггг" 
-                           pattern="\d{2}\.\d{2}\.\d{4}" title="Формат: дд.мм.гггг">
-                    <button type="button" class="calendar-icon" onclick="showDatePicker('startDate')">📅</button>
+        <form method="GET" action="/tasks/filter/advanced" id="advancedFilterForm">
+            <div class="filter-grid">
+                <!-- Статус -->
+                <div class="filter-group">
+                    <label class="filter-label">Статус:</label>
+                    <select name="completed" class="filter-input">
+                        <option value="">Все задачи</option>
+                        <option value="false">✅ Активные</option>
+                        <option value="true">☑️ Завершенные</option>
+                    </select>
                 </div>
                 
-                <span>-</span>
-                
-                <div class="date-input-wrapper">
-                    <input type="text" name="end" id="endDate" placeholder="дд.мм.гггг"
-                           pattern="\d{2}\.\d{2}\.\d{4}" title="Формат: дд.мм.гггг">
-                    <button type="button" class="calendar-icon" onclick="showDatePicker('endDate')">📅</button>
+                <!-- Приоритет -->
+                <div class="filter-group">
+                    <label class="filter-label">Приоритет:</label>
+                    <select name="priority" class="filter-input">
+                        <option value="">Все приоритеты</option>
+                        <option value="low">🔵 Низкий</option>
+                        <option value="medium">🟡 Средний</option>
+                        <option value="high">🔴 Высокий</option>
+                    </select>
                 </div>
                 
-                <button type="submit" class="filter-btn">Применить</button>
-                <a href="/" class="filter-btn">Сбросить</a>
-            </form>
-        </div>
-        
-<!-- Форма расширенной фильтрации -->
-<div class="advanced-filters" style="margin: 15px 0; padding: 10px; background: #f5f5f5; border-radius: 5px;">
-    <h3>Расширенная фильтрация</h3>
-    <form method="GET" action="/tasks/filter/advanced" id="advancedFilterForm">
-        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-            <select name="completed" style="padding: 8px;">
-                <option value="">Все задачи</option>
-                <option value="false">Активные</option>
-                <option value="true">Завершенные</option>
-            </select>
+                <!-- Теги -->
+                <div class="filter-group">
+                    <label class="filter-label">Теги:</label>
+                    <input type="text" name="tags" placeholder="работа,личное,покупки" class="filter-input">
+                </div>
+                
+                <!-- Дата начала -->
+                <div class="filter-group">
+                    <label class="filter-label">Дата с:</label>
+                    <div class="date-input-wrapper">
+                        <input type="text" name="start_date" id="startDate" placeholder="дд.мм.гггг" 
+                               pattern="\d{2}\.\d{2}\.\d{4}" class="filter-input" style="flex-grow:1;">
+                        <button type="button" class="calendar-icon" onclick="showDatePicker('startDate')">📅</button>
+                    </div>
+                </div>
+                
+                <!-- Дата окончания -->
+                <div class="filter-group">
+                    <label class="filter-label">Дата по:</label>
+                    <div class="date-input-wrapper">
+                        <input type="text" name="end_date" id="endDate" placeholder="дд.мм.гггг"
+                               pattern="\d{2}\.\d{2}\.\d{4}" class="filter-input" style="flex-grow:1;">
+                        <button type="button" class="calendar-icon" onclick="showDatePicker('endDate')">📅</button>
+                    </div>
+                </div>
+                
+                <!-- Наличие даты -->
+                <div class="filter-group">
+                    <label class="filter-label">Дата исполнения:</label>
+                    <select name="has_due_date" class="filter-input">
+                        <option value="">Все задачи</option>
+                        <option value="true">📅 Только с датой</option>
+                        <option value="false">⏳ Без даты</option>
+                    </select>
+                </div>
+            </div>
             
-            <select name="priority" style="padding: 8px;">
-                <option value="">Любой приоритет</option>
-                <option value="low">Низкий</option>
-                <option value="medium">Средний</option>
-                <option value="high">Высокий</option>
-            </select>
-            
-            <input type="text" name="tags" placeholder="Теги (через запятую)" style="padding: 8px; width: 200px;">
-            
-            <input type="text" name="start_date" placeholder="Начало (дд.мм.гггг)" 
-                   pattern="\d{2}\.\d{2}\.\d{4}" style="padding: 8px; width: 120px;">
-            
-            <input type="text" name="end_date" placeholder="Конец (дд.мм.гггг)" 
-                   pattern="\d{2}\.\d{2}\.\d{4}" style="padding: 8px; width: 120px;">
-            
-            <select name="has_due_date" style="padding: 8px;">
-                <option value="">Все задачи</option>
-                <option value="true">Только с датой</option>
-                <option value="false">Без даты</option>
-            </select>
-            
-            <button type="submit" style="padding: 8px 12px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                Применить фильтры
-            </button>
-            
-            <button type="button" onclick="resetAdvancedFilters()" style="padding: 8px 12px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                Сбросить
-            </button>
-        </div>
-    </form>
-</div>
+            <!-- Кнопки -->
+            <div class="filter-buttons">
+                <button type="submit" class="quick-filter-btn apply-btn">
+                    🔍 Применить фильтры
+                </button>
+                
+                <button type="button" onclick="resetAdvancedFilters()" class="quick-filter-btn reset-btn">
+                    🗑️ Сбросить
+                </button>
+                
+                <a href="/" class="quick-filter-btn all-tasks-btn">
+                    📋 Все задачи
+                </a>
+            </div>
+        </form>
+    </div>
 
-<script>
-function resetAdvancedFilters() {
-    document.getElementById('advancedFilterForm').reset();
-    window.location.href = '/';
-}
-
-// Заполняем форму значениями из URL при загрузке
-document.addEventListener('DOMContentLoaded', function() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const form = document.getElementById('advancedFilterForm');
-    
-    if (form && urlParams.has('completed')) {
-        // Заполняем форму значениями из query string
-        ['completed', 'priority', 'tags', 'start_date', 'end_date', 'has_due_date'].forEach(param => {
-            const value = urlParams.get(param);
-            if (value && form.elements[param]) {
-                form.elements[param].value = value;
-            }
-        });
-    }
-});
-</script>
-
-        {{if gt (len (getPopularTags .Tasks)) 0}}
-        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:10px;width:100%;">
-            <strong style="align-self:center;">Теги:</strong>
-            {{range $tag := getPopularTags .Tasks}}
-                <a href="/tasks/tag/{{$tag | urlquery}}" class="filter-btn">{{$tag}}</a>
-            {{end}}
-        </div>
-        {{end}}
+    <!-- Быстрые фильтры -->
+    <div class="quick-filters">
+        <button onclick="applyQuickFilter('active_high')" class="quick-filter-btn">
+            🔥 Активные + Высокий
+        </button>
+        <button onclick="applyQuickFilter('active_week')" class="quick-filter-btn">
+            📅 Активные на неделю
+        </button>
+        <button onclick="applyQuickFilter('no_date')" class="quick-filter-btn">
+            ⏳ Задачи без даты
+        </button>
+        <button onclick="applyQuickFilter('active_medium')" class="quick-filter-btn">
+            ⚡ Активные + Средний
+        </button>
     </div>
     
+    <!-- Список задач -->
     <div id="task-list">
         {{range .Tasks}}
         <div class="task {{if .Completed}}completed{{end}}" id="task-{{.ID}}">
@@ -314,7 +398,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 </div>
                 {{end}}
                 
-                <button class="toggle-subtasks-btn" onclick="toggleSubtasks('{{.ID}}')">Подзадачи</button>
+                <!-- Статус подзадач -->
+                <div class="subtasks-summary" id="subtasks-summary-{{.ID}}">
+                    <span>📋 Подзадачи: </span>
+                    <span class="subtasks-progress">
+                        <span class="progress-text">загрузка...</span>
+                    </span>
+                </div>
+                
+                <button class="toggle-subtasks-btn" onclick="toggleSubtasks('{{.ID}}')">Показать подзадачи</button>
                 
                 <div class="subtasks" id="subtasks-{{.ID}}" style="display:none;">
                     <!-- Подзадачи будут загружены через AJAX -->
@@ -367,7 +459,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 taskElement.querySelector('.task-actions'),
                 taskElement.querySelector('.toggle-subtasks-btn'),
                 taskElement.querySelector('.subtasks'),
-                taskElement.querySelector('.subtask-input-container')
+                taskElement.querySelector('.subtask-input-container'),
+                taskElement.querySelector('.subtasks-summary')
             ];
             
             elementsToHide.forEach(el => {
@@ -401,7 +494,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 taskElement.querySelector('.tags-container'),
                 taskElement.querySelector('.task-actions'),
                 taskElement.querySelector('.toggle-subtasks-btn'),
-                taskElement.querySelector('.subtask-input-container')
+                taskElement.querySelector('.subtask-input-container'),
+                taskElement.querySelector('.subtasks-summary')
             ];
             
             elementsToShow.forEach(el => {
@@ -413,98 +507,55 @@ document.addEventListener('DOMContentLoaded', function() {
             
             const editForm = document.getElementById('edit-form-' + id);
             if (editForm) editForm.style.display = 'none';
-        }
-
-        // Функции для фильтра по дате
-        function setupDatePickers() {
-            const startInput = document.getElementById('startDate');
-            const endInput = document.getElementById('endDate');
             
-            // Создаем скрытые input type="date" для календарей
-            const createDatePicker = (input) => {
-                const wrapper = input.parentNode;
-                const datePicker = document.createElement('input');
-                datePicker.type = 'date';
-                datePicker.title = "Показать окно выбора даты";
-                
-                // Устанавливаем текущее значение
-                if (input.value && input.value.match(/\d{2}\.\d{2}\.\d{4}/)) {
-                    const [day, month, year] = input.value.split('.');
-                    datePicker.value = `${year}-${month}-${day}`;
-                }
-                
-                // Обновляем текстовое поле при выборе даты
-                datePicker.addEventListener('change', function() {
-                    if (this.value) {
-                        const [year, month, day] = this.value.split('-');
-                        input.value = `${day}.${month}.${year}`;
-                    }
-                });
-                
-                wrapper.appendChild(datePicker);
-                
-                // При клике на текстовое поле тоже показываем календарь
-                input.addEventListener('click', function() {
-                    datePicker.click();
-                });
-            };
+            // Скрываем подзадачи если они были открыты
+            const subtasks = taskElement.querySelector('.subtasks');
+            if (subtasks) subtasks.style.display = 'none';
             
-            createDatePicker(startInput);
-            createDatePicker(endInput);
-        }
-
-        function setupDateInputs() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const startParam = urlParams.get('start');
-            const endParam = urlParams.get('end');
-
-            const today = new Date();
-            const nextWeek = new Date(today);
-            nextWeek.setDate(today.getDate() + 7);
-
-            const formatToRussian = (date) => {
-                const day = String(date.getDate()).padStart(2, '0');
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                return `${day}.${month}.${date.getFullYear()}`;
-            };
-
-            // Устанавливаем значения по умолчанию или из URL
-            document.getElementById('startDate').value = startParam || formatToRussian(today);
-            document.getElementById('endDate').value = endParam || formatToRussian(nextWeek);
-
-            // Маска ввода для даты
-            ['startDate', 'endDate'].forEach(id => {
-                const input = document.getElementById(id);
-                input.addEventListener('input', function(e) {
-                    let value = this.value.replace(/\D/g, '');
-                    if (value.length > 8) value = value.slice(0, 8);
-                    
-                    let formatted = '';
-                    for (let i = 0; i < value.length; i++) {
-                        if (i === 2 || i === 4) formatted += '.';
-                        formatted += value[i];
-                    }
-                    
-                    this.value = formatted;
-                });
-            });
+            const toggleBtn = taskElement.querySelector('.toggle-subtasks-btn');
+            if (toggleBtn) {
+                toggleBtn.classList.remove('expanded');
+                toggleBtn.textContent = 'Показать подзадачи';
+            }
         }
 
         // Функции для работы с подзадачами
+        function updateSubtasksSummary(taskId, subtasks) {
+            const summaryElement = document.getElementById(`subtasks-summary-${taskId}`);
+            if (!summaryElement) return;
+            
+            const total = subtasks.length;
+            const completed = subtasks.filter(st => st.completed).length;
+            
+            if (total === 0) {
+                summaryElement.innerHTML = '<span>📋 Подзадачи: нет</span>';
+            } else {
+                summaryElement.innerHTML = `
+                    <span>📋 Подзадачи: </span>
+                    <span class="subtasks-progress">
+                        <span class="progress-text">${completed}/${total} выполнено</span>
+                        ${completed === total ? '✅' : '⏳'}
+                    </span>
+                `;
+            }
+        }
+
         function toggleSubtasks(taskId) {
             const subtasksContainer = document.getElementById(`subtasks-${taskId}`);
             const toggleBtn = document.querySelector(`#task-${taskId} .toggle-subtasks-btn`);
             
             if (subtasksContainer.style.display === 'none' || !subtasksContainer.style.display) {
                 // Загружаем подзадачи только при первом открытии
-                if (subtasksContainer.innerHTML.trim() === '') {
+                if (subtasksContainer.innerHTML.trim() === '' || subtasksContainer.innerHTML.includes('загрузка')) {
                     loadSubtasks(taskId);
                 }
                 subtasksContainer.style.display = 'block';
                 toggleBtn.classList.add('expanded');
+                toggleBtn.textContent = 'Скрыть подзадачи';
             } else {
                 subtasksContainer.style.display = 'none';
                 toggleBtn.classList.remove('expanded');
+                toggleBtn.textContent = 'Показать подзадачи';
             }
         }
 
@@ -518,8 +569,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     const container = document.getElementById(`subtasks-${taskId}`);
                     if (!container) return;
                     
+                    // Обновляем summary
+                    updateSubtasksSummary(taskId, subtasks);
+                    
                     if (subtasks.length === 0) {
-                        container.innerHTML = '<div style="color:#666;font-size:0.9em;">Нет подзадач</div>';
+                        container.innerHTML = '<div style="color:#666;font-size:0.9em;padding:10px;">Нет подзадач</div>';
                         return;
                     }
                     
@@ -529,7 +583,7 @@ document.addEventListener('DOMContentLoaded', function() {
                                    onchange="toggleSubtaskStatus(${subtask.id}, ${taskId})">
                             <span class="subtask-description">${subtask.description}</span>
                             <div class="subtask-actions">
-                                <button onclick="deleteSubtask(${subtask.id}, ${taskId})" style="background:none;border:none;color:#f44336;cursor:pointer;">🗑️</button>
+                                <button onclick="deleteSubtask(${subtask.id}, ${taskId})" style="background:none;border:none;color:#f44336;cursor:pointer;padding:5px;">🗑️</button>
                             </div>
                         </div>
                     `).join('');
@@ -572,14 +626,8 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then(response => {
                 if (!response.ok) throw new Error('Ошибка обновления подзадачи');
-                const subtaskElement = document.getElementById(`subtask-${subtaskId}`);
-                if (subtaskElement) {
-                    subtaskElement.classList.toggle('completed');
-                    const description = subtaskElement.querySelector('.subtask-description');
-                    if (description) {
-                        description.style.textDecoration = subtaskElement.classList.contains('completed') ? 'line-through' : 'none';
-                    }
-                }
+                // Перезагружаем подзадачи для обновления статуса
+                return loadSubtasks(taskId);
             })
             .catch(error => {
                 console.error('Ошибка:', error);
@@ -603,27 +651,153 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
 
-        // Инициализация при загрузке страницы
-        document.addEventListener('DOMContentLoaded', function() {
-            // Подсветка активного фильтра
-            const path = window.location.pathname;
-            const links = document.querySelectorAll('.filter-btn');
-            
-            links.forEach(link => {
-                if (link && path.includes(link.getAttribute('href'))) {
-                    link.classList.add('active-filter');
+        // Функции для календаря
+        function setupDatePickers() {
+            const createDatePicker = (inputId) => {
+                const input = document.getElementById(inputId);
+                if (!input) return;
+                
+                const wrapper = input.parentNode;
+                const datePicker = document.createElement('input');
+                datePicker.type = 'date';
+                datePicker.style.position = 'absolute';
+                datePicker.style.opacity = '0';
+                datePicker.style.width = '30px';
+                datePicker.style.height = '30px';
+                datePicker.style.cursor = 'pointer';
+                datePicker.title = "Выбрать дату";
+                
+                // Устанавливаем текущее значение
+                if (input.value && input.value.match(/\d{2}\.\d{2}\.\d{4}/)) {
+                    const [day, month, year] = input.value.split('.');
+                    datePicker.value = `${year}-${month}-${day}`;
                 }
-            });
+                
+                // Обновляем текстовое поле при выборе даты
+                datePicker.addEventListener('change', function() {
+                    if (this.value) {
+                        const [year, month, day] = this.value.split('-');
+                        input.value = `${day}.${month}.${year}`;
+                    }
+                });
+                
+                wrapper.appendChild(datePicker);
+            };
             
-            // Инициализация фильтра по дате
-            setupDateInputs();
-            setupDatePickers();
+            createDatePicker('startDate');
+            createDatePicker('endDate');
+        }
+
+        function showDatePicker(inputId) {
+            const input = document.getElementById(inputId);
+            if (input && input.parentNode) {
+                const datePicker = input.parentNode.querySelector('input[type="date"]');
+                if (datePicker) {
+                    datePicker.showPicker();
+                }
+            }
+        }
+
+        // Быстрые фильтры
+        function applyQuickFilter(filterType) {
+            const form = document.getElementById('advancedFilterForm');
+            if (!form) return;
             
-            // Обработка формы задачи (чтобы страница не перезагружалась)
-            document.querySelector('.task-form').addEventListener('submit', function(e) {
-                e.preventDefault();
-                this.submit();
+            // Сбрасываем форму
+            form.reset();
+            
+            const today = new Date();
+            const nextWeek = new Date(today);
+            nextWeek.setDate(today.getDate() + 7);
+            
+            const formatToRussian = (date) => {
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                return `${day}.${month}.${date.getFullYear()}`;
+            };
+            
+            switch(filterType) {
+                case 'active_high':
+                    form.elements['completed'].value = 'false';
+                    form.elements['priority'].value = 'high';
+                    break;
+                case 'active_medium':
+                    form.elements['completed'].value = 'false';
+                    form.elements['priority'].value = 'medium';
+                    break;
+                case 'active_week':
+                    form.elements['completed'].value = 'false';
+                    form.elements['start_date'].value = formatToRussian(today);
+                    form.elements['end_date'].value = formatToRussian(nextWeek);
+                    form.elements['has_due_date'].value = 'true';
+                    break;
+                case 'no_date':
+                    form.elements['has_due_date'].value = 'false';
+                    break;
+            }
+            
+            form.submit();
+        }
+
+        function resetAdvancedFilters() {
+            const form = document.getElementById('advancedFilterForm');
+            if (form) {
+                form.reset();
+            }
+            window.location.href = '/';
+        }
+
+        // Заполняем форму значениями из URL при загрузке
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const form = document.getElementById('advancedFilterForm');
+            
+            if (form) {
+                // Заполняем форму значениями из query string
+                ['completed', 'priority', 'tags', 'start_date', 'end_date', 'has_due_date'].forEach(param => {
+                    const value = urlParams.get(param);
+                    if (value && form.elements[param]) {
+                        form.elements[param].value = value;
+                    }
+                });
+                
+                // Инициализируем календари
+                setupDatePickers();
+            }
+            
+            // Подсветка активных фильтров
+            highlightActiveFilters();
+            
+            // Загружаем подзадачи для всех задач
+            document.querySelectorAll('.task').forEach(taskElement => {
+                const taskId = taskElement.id.split('-')[1];
+                loadSubtasks(taskId);
             });
+        });
+
+        function highlightActiveFilters() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const filtersContainer = document.getElementById('advancedFilters');
+            
+            if (!filtersContainer) return;
+            
+            // Проверяем, есть ли активные фильтры
+            const hasActiveFilters = Array.from(urlParams.keys()).some(key => 
+                key !== '' && urlParams.get(key) !== '' && 
+                ['completed', 'priority', 'tags', 'start_date', 'end_date', 'has_due_date'].includes(key)
+            );
+            
+            if (hasActiveFilters) {
+                filtersContainer.classList.add('active');
+            } else {
+                filtersContainer.classList.remove('active');
+            }
+        }
+
+        // Обработка формы задачи
+        document.querySelector('.task-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            this.submit();
         });
     </script>
 </body>
