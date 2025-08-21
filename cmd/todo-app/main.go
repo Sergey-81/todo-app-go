@@ -438,11 +438,15 @@ func setupRoutes(r *chi.Mux, tm *manager.TaskManager, stm *manager.SubTaskManage
 		}
 	}
 	
-	// Теги
+	// Теги (ИСПРАВЛЕНО - нормализация тегов)
 	if tagsStr := query.Get("tags"); tagsStr != "" {
-		options.Tags = strings.Split(tagsStr, ",")
-		for i := range options.Tags {
-			options.Tags[i] = strings.TrimSpace(options.Tags[i])
+		rawTags := strings.Split(tagsStr, ",")
+		options.Tags = make([]string, 0)
+		for _, tag := range rawTags {
+			tag = strings.TrimSpace(tag)
+			if tag != "" {
+				options.Tags = append(options.Tags, tag)
+			}
 		}
 	}
 	

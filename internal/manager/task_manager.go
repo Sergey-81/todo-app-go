@@ -487,12 +487,13 @@ func (tm *TaskManager) FilterTasksAdvanced(options FilterOptions) []Task {
 			continue
 		}
 		
-		// Фильтр по тегам
+		// Фильтр по тегам (ИСПРАВЛЕНО)
 		if len(options.Tags) > 0 {
 			hasMatchingTag := false
 			for _, filterTag := range options.Tags {
+				filterTag = strings.TrimSpace(strings.ToLower(filterTag))
 				for _, taskTag := range task.Tags {
-					if strings.EqualFold(taskTag, filterTag) {
+					if strings.ToLower(taskTag) == filterTag {
 						hasMatchingTag = true
 						break
 					}
@@ -506,21 +507,27 @@ func (tm *TaskManager) FilterTasksAdvanced(options FilterOptions) []Task {
 			}
 		}
 		
-		// Фильтр по дате
+		// Фильтр по наличию даты (ИСПРАВЛЕНО)
+		if options.HasDueDate != nil {
+			hasDueDate := !task.DueDate.IsZero()
+			if hasDueDate != *options.HasDueDate {
+				continue
+			}
+		}
+		
+		// Фильтр по диапазону дат
 		if options.StartDate != nil || options.EndDate != nil {
+			// Если у задачи нет due date, пропускаем если нужны задачи с датами
 			if task.DueDate.IsZero() {
-				// Если у задачи нет due date, пропускаем если нужны задачи с датами
-				if options.HasDueDate != nil && *options.HasDueDate {
-					continue
-				}
-			} else {
-				// Проверяем диапазон дат
-				if options.StartDate != nil && task.DueDate.Before(*options.StartDate) {
-					continue
-				}
-				if options.EndDate != nil && task.DueDate.After(*options.EndDate) {
-					continue
-				}
+				continue
+			}
+			
+			// Проверяем диапазон дат
+			if options.StartDate != nil && task.DueDate.Before(*options.StartDate) {
+				continue
+			}
+			if options.EndDate != nil && task.DueDate.After(*options.EndDate) {
+				continue
 			}
 		}
 		
@@ -529,6 +536,15 @@ func (tm *TaskManager) FilterTasksAdvanced(options FilterOptions) []Task {
 	
 	// Сортируем по дате выполнения
 	sort.Slice(tasks, func(i, j int) bool {
+		if tasks[i].DueDate.IsZero() && !tasks[j].DueDate.IsZero() {
+			return false
+		}
+		if !tasks[i].DueDate.IsZero() && tasks[j].DueDate.IsZero() {
+			return true
+		}
+		if tasks[i].DueDate.IsZero() && tasks[j].DueDate.IsZero() {
+			return tasks[i].ID < tasks[j].ID
+		}
 		return tasks[i].DueDate.Before(tasks[j].DueDate)
 	})
 	
