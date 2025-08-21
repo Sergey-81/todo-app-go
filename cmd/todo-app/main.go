@@ -418,4 +418,56 @@ func setupRoutes(r *chi.Mux, tm *manager.TaskManager, stm *manager.SubTaskManage
 		
 		w.WriteHeader(http.StatusOK)
 	})
+
+	r.Get("/tasks/filter/advanced", func(w http.ResponseWriter, r *http.Request) {
+	// Парсим параметры запроса
+	query := r.URL.Query()
+	options := manager.FilterOptions{}
+	
+	// Статус выполнения
+	if completedStr := query.Get("completed"); completedStr != "" {
+		completed := completedStr == "true"
+		options.Completed = &completed
+	}
+	
+	// Приоритет
+	if priorityStr := query.Get("priority"); priorityStr != "" {
+		priority := manager.Priority(priorityStr)
+		if priority == manager.PriorityLow || priority == manager.PriorityMedium || priority == manager.PriorityHigh {
+			options.Priority = &priority
+		}
+	}
+	
+	// Теги
+	if tagsStr := query.Get("tags"); tagsStr != "" {
+		options.Tags = strings.Split(tagsStr, ",")
+		for i := range options.Tags {
+			options.Tags[i] = strings.TrimSpace(options.Tags[i])
+		}
+	}
+	
+	// Диапазон дат
+	if startStr := query.Get("start_date"); startStr != "" {
+		if start, err := time.Parse("02.01.2006", startStr); err == nil {
+			options.StartDate = &start
+		}
+	}
+	
+	if endStr := query.Get("end_date"); endStr != "" {
+		if end, err := time.Parse("02.01.2006", endStr); err == nil {
+			options.EndDate = &end
+		}
+	}
+	
+	// Флаг наличия due date
+	if hasDueDateStr := query.Get("has_due_date"); hasDueDateStr != "" {
+		hasDueDate := hasDueDateStr == "true"
+		options.HasDueDate = &hasDueDate
+	}
+	
+	filteredTasks := tm.FilterTasksAdvanced(options)
+	
+	tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
+	tmpl.Execute(w, TemplateData{Tasks: filteredTasks})
+})
 }

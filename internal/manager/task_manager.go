@@ -115,6 +115,16 @@ type SubTaskManager struct {
 	nextID   int
 }
 
+// FilterOptions - параметры для комбинированной фильтрации
+type FilterOptions struct {
+	Completed   *bool      `json:"completed,omitempty"`
+	Priority    *Priority  `json:"priority,omitempty"`
+	Tags        []string   `json:"tags,omitempty"`
+	StartDate   *time.Time `json:"start_date,omitempty"`
+	EndDate     *time.Time `json:"end_date,omitempty"`
+	HasDueDate  *bool      `json:"has_due_date,omitempty"`
+}
+
 func NewTaskManager() *TaskManager {
 	return &TaskManager{
 		tasks:  make(map[int]Task),
@@ -458,4 +468,69 @@ func (stm *SubTaskManager) DeleteSubTask(id int) error {
 	delete(stm.subtasks, id)
 	logger.Info(context.Background(), "Подзадача удалена", "subtaskID", id)
 	return nil
+}
+
+func (tm *TaskManager) FilterTasksAdvanced(options FilterOptions) []Task {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	
+	tasks := make([]Task, 0)
+	
+	for _, task := range tm.tasks {
+		// Фильтр по статусу выполнения
+		if options.Completed != nil && task.Completed != *options.Completed {
+			continue
+		}
+		
+		// Фильтр по приоритету
+		if options.Priority != nil && task.Priority != *options.Priority {
+			continue
+		}
+		
+		// Фильтр по тегам
+		if len(options.Tags) > 0 {
+			hasMatchingTag := false
+			for _, filterTag := range options.Tags {
+				for _, taskTag := range task.Tags {
+					if strings.EqualFold(taskTag, filterTag) {
+						hasMatchingTag = true
+						break
+					}
+				}
+				if hasMatchingTag {
+					break
+				}
+			}
+			if !hasMatchingTag {
+				continue
+			}
+		}
+		
+		// Фильтр по дате
+		if options.StartDate != nil || options.EndDate != nil {
+			if task.DueDate.IsZero() {
+				// Если у задачи нет due date, пропускаем если нужны задачи с датами
+				if options.HasDueDate != nil && *options.HasDueDate {
+					continue
+				}
+			} else {
+				// Проверяем диапазон дат
+				if options.StartDate != nil && task.DueDate.Before(*options.StartDate) {
+					continue
+				}
+				if options.EndDate != nil && task.DueDate.After(*options.EndDate) {
+					continue
+				}
+			}
+		}
+		
+		tasks = append(tasks, task)
+	}
+	
+	// Сортируем по дате выполнения
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].DueDate.Before(tasks[j].DueDate)
+	})
+	
+	return tasks
 }

@@ -215,6 +215,72 @@
             </form>
         </div>
         
+<!-- Форма расширенной фильтрации -->
+<div class="advanced-filters" style="margin: 15px 0; padding: 10px; background: #f5f5f5; border-radius: 5px;">
+    <h3>Расширенная фильтрация</h3>
+    <form method="GET" action="/tasks/filter/advanced" id="advancedFilterForm">
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+            <select name="completed" style="padding: 8px;">
+                <option value="">Все задачи</option>
+                <option value="false">Активные</option>
+                <option value="true">Завершенные</option>
+            </select>
+            
+            <select name="priority" style="padding: 8px;">
+                <option value="">Любой приоритет</option>
+                <option value="low">Низкий</option>
+                <option value="medium">Средний</option>
+                <option value="high">Высокий</option>
+            </select>
+            
+            <input type="text" name="tags" placeholder="Теги (через запятую)" style="padding: 8px; width: 200px;">
+            
+            <input type="text" name="start_date" placeholder="Начало (дд.мм.гггг)" 
+                   pattern="\d{2}\.\d{2}\.\d{4}" style="padding: 8px; width: 120px;">
+            
+            <input type="text" name="end_date" placeholder="Конец (дд.мм.гггг)" 
+                   pattern="\d{2}\.\d{2}\.\d{4}" style="padding: 8px; width: 120px;">
+            
+            <select name="has_due_date" style="padding: 8px;">
+                <option value="">Все задачи</option>
+                <option value="true">Только с датой</option>
+                <option value="false">Без даты</option>
+            </select>
+            
+            <button type="submit" style="padding: 8px 12px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Применить фильтры
+            </button>
+            
+            <button type="button" onclick="resetAdvancedFilters()" style="padding: 8px 12px; background: #f44336; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Сбросить
+            </button>
+        </div>
+    </form>
+</div>
+
+<script>
+function resetAdvancedFilters() {
+    document.getElementById('advancedFilterForm').reset();
+    window.location.href = '/';
+}
+
+// Заполняем форму значениями из URL при загрузке
+document.addEventListener('DOMContentLoaded', function() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const form = document.getElementById('advancedFilterForm');
+    
+    if (form && urlParams.has('completed')) {
+        // Заполняем форму значениями из query string
+        ['completed', 'priority', 'tags', 'start_date', 'end_date', 'has_due_date'].forEach(param => {
+            const value = urlParams.get(param);
+            if (value && form.elements[param]) {
+                form.elements[param].value = value;
+            }
+        });
+    }
+});
+</script>
+
         {{if gt (len (getPopularTags .Tasks)) 0}}
         <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:10px;width:100%;">
             <strong style="align-self:center;">Теги:</strong>
