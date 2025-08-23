@@ -17,6 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"todo-app/internal/logger"
 	"todo-app/internal/manager"
+	"todo-app/internal/storage" // 🆕 Добавляем этот импорт!
 )
 
 type TemplateData struct {
@@ -77,11 +78,33 @@ func main() {
 	printWelcomeMessage()
 	logger.Info(ctx, "Starting todo-app server...")
 
-	tm := manager.NewTaskManager()
-	stm := manager.NewSubTaskManager() // Добавляем менеджер подзадач
+// 🆕 Создаем директорию data если её нет
+	if err := os.MkdirAll("data", 0755); err != nil {
+		logger.Error(ctx, err, "Ошибка создания директории data")
+		return
+	}
+
+	// 🆕 Инициализируем SQLite хранилище
+	dbStorage, err := storage.NewSQLiteStorage("./data/todoapp.db")
+	if err != nil {
+		logger.Error(ctx, err, "Ошибка инициализации SQLite хранилища")
+		return
+	}
+	defer dbStorage.Close()
+
+	logger.Info(ctx, "SQLite хранилище успешно инициализировано")
+
+	// 🆕 Создаем менеджер с хранилищем
+	taskManager := manager.NewTaskManagerWithStorage(dbStorage)
+
+	// 🆕 Для подзадач пока используем старый менеджер (будем обновлять постепенно)
+	subTaskManager := manager.NewSubTaskManager()
+
+//	tm := manager.NewTaskManager()
+//	stm := manager.NewSubTaskManager() // Добавляем менеджер подзадач
 
 	r := chi.NewRouter()
-	setupRoutes(r, tm, stm) // Передаем оба менеджера
+	setupRoutes(r, taskManager, subTaskManager)
 
 	server := &http.Server{
 		Addr:    ":8080",

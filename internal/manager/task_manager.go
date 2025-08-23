@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"log"
 
 	"todo-app/internal/logger"
 	"github.com/prometheus/client_golang/prometheus"
@@ -107,12 +108,14 @@ type TaskManager struct {
 	mu     sync.Mutex
 	tasks  map[int]Task
 	nextID int
+	storage Storage      // 🆕 Добавляем поле для хранилища
 }
 
 type SubTaskManager struct {
 	mu       sync.Mutex
 	subtasks map[int]SubTask
 	nextID   int
+	storage  Storage         // 🆕 Добавляем поле для хранилища
 }
 
 // FilterOptions - параметры для комбинированной фильтрации
@@ -129,6 +132,7 @@ func NewTaskManager() *TaskManager {
 	return &TaskManager{
 		tasks:  make(map[int]Task),
 		nextID: 1,
+		storage: nil, // 🆕 In-memory режим
 	}
 }
 
@@ -136,6 +140,7 @@ func NewSubTaskManager() *SubTaskManager {
 	return &SubTaskManager{
 		subtasks: make(map[int]SubTask),
 		nextID:   1,
+		storage:  nil,
 	}
 }
 
@@ -168,6 +173,25 @@ func (tm *TaskManager) AddTask(description string, tags []string) (int, error) {
 	}
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+
+	// 🆕 Используем хранилище если оно есть
+	if tm.storage != nil {
+		log.Printf("📦 Используем SQLite хранилище для задачи: %s (теги: %v)", description, tags)
+		id, err := tm.storage.AddTask(description, tags)
+		if err != nil {
+			log.Printf("❌ Ошибка добавления в хранилище: %v", err)
+			AddTaskCount.WithLabelValues("error").Inc()
+			return 0, err
+		}
+		log.Printf("✅ Задача #%d добавлена в SQLite хранилище", id)
+		TaskDescLength.Observe(float64(len(description)))
+		AddTaskCount.WithLabelValues("success").Inc()
+		logger.Info(context.Background(), "Задача добавлена в хранилище", "taskID", id, "tags", tags)
+		return id, nil
+	}
+
+	// Старая in-memory логика
+	log.Printf("💾 Используем in-memory хранилище для задачи: %s (теги: %v)", description, tags)
 	id := tm.nextID
 	tm.tasks[id] = Task{
 		ID:          id,
@@ -179,9 +203,10 @@ func (tm *TaskManager) AddTask(description string, tags []string) (int, error) {
 		Tags:        normalizeTags(tags),
 	}
 	tm.nextID++
+	log.Printf("✅ Задача #%d добавлена в память", id)
 	TaskDescLength.Observe(float64(len(description)))
 	AddTaskCount.WithLabelValues("success").Inc()
-	logger.Info(context.Background(), "Задача добавлена", "taskID", id, "tags", tags)
+	logger.Info(context.Background(), "Задача добавлена в память", "taskID", id, "tags", tags)
 	return id, nil
 }
 
@@ -192,11 +217,27 @@ func (tm *TaskManager) UpdateTask(id int, req UpdateTaskRequest) (*Task, error) 
 	}()
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+	
+	// 🆕 Используем хранилище если оно есть
+	if tm.storage != nil {
+		log.Printf("📦 Используем хранилище для обновления задачи #%d", id)
+		task, err := tm.storage.UpdateTask(id, req)
+		if err != nil {
+			UpdateTaskCount.WithLabelValues("error").Inc()
+			return nil, err
+		}
+		UpdateTaskCount.WithLabelValues("success").Inc()
+		logger.Info(context.Background(), "Задача обновлена в хранилище", "taskID", id, "tags", task.Tags)
+		return task, nil
+	}
+	
+	// Старая in-memory логика
 	task, exists := tm.tasks[id]
 	if !exists {
 		UpdateTaskCount.WithLabelValues("error").Inc()
 		return nil, fmt.Errorf("задача с ID %d не найдена", id)
 	}
+	
 	if req.Description != nil {
 		if *req.Description == "" {
 			UpdateTaskCount.WithLabelValues("error").Inc()
@@ -208,18 +249,23 @@ func (tm *TaskManager) UpdateTask(id int, req UpdateTaskRequest) (*Task, error) 
 		}
 		task.Description = *req.Description
 	}
+	
 	if req.Completed != nil {
 		task.Completed = *req.Completed
 	}
+	
 	if req.Priority != nil {
 		task.Priority = *req.Priority
 	}
+	
 	if req.DueDate != nil {
 		task.DueDate = *req.DueDate
 	}
+	
 	if req.Tags != nil {
 		task.Tags = normalizeTags(*req.Tags)
 	}
+	
 	task.UpdatedAt = time.Now()
 	tm.tasks[id] = task
 	UpdateTaskCount.WithLabelValues("success").Inc()
@@ -234,33 +280,54 @@ func (tm *TaskManager) DeleteTask(id int) error {
 	}()
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+	
+	// 🆕 Используем хранилище если оно есть
+	if tm.storage != nil {
+		log.Printf("📦 Используем хранилище для удаления задачи #%d", id)
+		err := tm.storage.DeleteTask(id)
+		if err != nil {
+			DeleteTaskCount.WithLabelValues("error").Inc()
+			return err
+		}
+		DeleteTaskCount.WithLabelValues("success").Inc()
+		logger.Info(context.Background(), "Задача удалена из хранилища", "taskID", id)
+		return nil
+	}
+	
+	// Старая in-memory логика
 	if _, exists := tm.tasks[id]; !exists {
 		DeleteTaskCount.WithLabelValues("error").Inc()
 		return fmt.Errorf("задача с ID %d не найдена", id)
 	}
 	delete(tm.tasks, id)
 	DeleteTaskCount.WithLabelValues("success").Inc()
-	logger.Info(context.Background(), "Задача удалена", "taskID", id)
+	logger.Info(context.Background(), "Задача удалена из памяти", "taskID", id)
 	return nil
-}
-
-func (tm *TaskManager) GetTask(id int) (*Task, error) {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	task, exists := tm.tasks[id]
-	if !exists {
-		return nil, fmt.Errorf("задача не найдена")
-	}
-	return &task, nil
 }
 
 func (tm *TaskManager) GetAllTasks() []Task {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+
+	// 🆕 Используем хранилище если оно есть
+	if tm.storage != nil {
+		log.Printf("📦 Загружаем задачи из SQLite хранилища")
+		tasks, err := tm.storage.GetAllTasks()
+		if err != nil {
+			log.Printf("❌ Ошибка загрузки из хранилища: %v", err)
+			return []Task{}
+		}
+		log.Printf("✅ Загружено %d задач из SQLite хранилища", len(tasks))
+		return tasks
+	}
+
+	// Старая in-memory логика
+	log.Printf("💾 Загружаем задачи из памяти")
 	tasks := make([]Task, 0, len(tm.tasks))
 	for _, task := range tm.tasks {
 		tasks = append(tasks, task)
 	}
+	log.Printf("✅ Загружено %d задач из памяти", len(tasks))
 	return tasks
 }
 
@@ -271,6 +338,21 @@ func (tm *TaskManager) ToggleComplete(id int) (*Task, error) {
 	}()
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+	
+	// 🆕 Используем хранилище если оно есть
+	if tm.storage != nil {
+		log.Printf("📦 Используем хранилище для переключения задачи #%d", id)
+		task, err := tm.storage.ToggleComplete(id)
+		if err != nil {
+			UpdateTaskCount.WithLabelValues("error").Inc()
+			return nil, err
+		}
+		UpdateTaskCount.WithLabelValues("success").Inc()
+		logger.Info(context.Background(), "Статус задачи изменен в хранилище", "taskID", id, "completed", task.Completed)
+		return task, nil
+	}
+	
+	// Старая in-memory логика
 	task, exists := tm.tasks[id]
 	if !exists {
 		UpdateTaskCount.WithLabelValues("error").Inc()
@@ -280,13 +362,27 @@ func (tm *TaskManager) ToggleComplete(id int) (*Task, error) {
 	task.UpdatedAt = time.Now()
 	tm.tasks[id] = task
 	UpdateTaskCount.WithLabelValues("success").Inc()
-	logger.Info(context.Background(), "Статус задачи изменен", "taskID", id, "completed", task.Completed)
+	logger.Info(context.Background(), "Статус задачи изменен в памяти", "taskID", id, "completed", task.Completed)
 	return &task, nil
 }
 
 func (tm *TaskManager) FilterTasks(completed *bool) []Task {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
+	
+	// 🆕 Используем хранилище если оно есть
+	if tm.storage != nil {
+		log.Printf("📦 Используем хранилище для фильтрации задач")
+		tasks, err := tm.storage.FilterTasks(completed)
+		if err != nil {
+			log.Printf("❌ Ошибка фильтрации в хранилище: %v", err)
+			return []Task{}
+		}
+		log.Printf("✅ Отфильтровано %d задач из хранилища", len(tasks))
+		return tasks
+	}
+	
+	// Старая in-memory логика
 	tasks := make([]Task, 0)
 	for _, task := range tm.tasks {
 		if completed == nil || task.Completed == *completed {
@@ -297,8 +393,19 @@ func (tm *TaskManager) FilterTasks(completed *bool) []Task {
 }
 
 func (tm *TaskManager) FilterByPriority(priority Priority) []Task {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
+    tm.mu.Lock()
+    defer tm.mu.Unlock()
+    
+    if tm.storage != nil {
+        tasks, err := tm.storage.FilterByPriority(priority)
+        if err != nil {
+            log.Printf("❌ Ошибка фильтрации по приоритету: %v", err)
+            return []Task{}
+        }
+        return tasks
+    }
+
+	// Старая in-memory логика
 	tasks := make([]Task, 0)
 	for _, task := range tm.tasks {
 		if task.Priority == priority {
@@ -473,7 +580,17 @@ func (stm *SubTaskManager) DeleteSubTask(id int) error {
 func (tm *TaskManager) FilterTasksAdvanced(options FilterOptions) []Task {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
-	
+	 // 🆕 Используем хранилище если оно есть
+    if tm.storage != nil {
+        log.Printf("📦 Используем хранилище для расширенной фильтрации")
+        tasks, err := tm.storage.FilterTasksAdvanced(options)
+        if err != nil {
+            log.Printf("❌ Ошибка расширенной фильтрации в хранилище: %v", err)
+            return []Task{}
+        }
+        log.Printf("✅ Отфильтровано %d задач расширенным фильтром", len(tasks))
+        return tasks
+    }
 	tasks := make([]Task, 0)
 	
 	for _, task := range tm.tasks {
@@ -549,4 +666,53 @@ func (tm *TaskManager) FilterTasksAdvanced(options FilterOptions) []Task {
 	})
 	
 	return tasks
+}
+
+// Новый конструктор с хранилищем
+func NewTaskManagerWithStorage(storage Storage) *TaskManager {
+	return &TaskManager{
+		tasks:  make(map[int]Task), // ← пока оставляем для обратной совместимости
+		nextID: 1,                  // ← пока оставляем для обратной совместимости
+		storage: storage,           // 🆕 Используем переданное хранилище
+	}
+}
+
+// 🆕 Новый конструктор с хранилищем
+func NewSubTaskManagerWithStorage(storage Storage) *SubTaskManager {
+	return &SubTaskManager{
+		subtasks: make(map[int]SubTask),
+		nextID:   1,
+		storage:  storage,
+	}
+}
+// 🆕 Метод для получения хранилища (нужен для SubTaskManager)
+func (tm *TaskManager) GetStorage() Storage {
+	return tm.storage
+}
+// Интерфейс хранилища
+type Storage interface {
+	// Основные методы задач
+	AddTask(description string, tags []string) (int, error)
+	GetAllTasks() ([]Task, error)
+	GetTask(id int) (*Task, error)
+	UpdateTask(id int, req UpdateTaskRequest) (*Task, error)
+	DeleteTask(id int) error
+	ToggleComplete(id int) (*Task, error)
+	
+	// 🆕 Методы фильтрации
+	FilterTasks(completed *bool) ([]Task, error)
+	FilterByPriority(priority Priority) ([]Task, error)
+	FilterByTag(tag string) ([]Task, error)
+	GetUpcomingTasks(days int) ([]Task, error)
+	FilterByDateRange(start, end time.Time) ([]Task, error)
+	FilterTasksAdvanced(options FilterOptions) ([]Task, error)
+
+	// Методы подзадач
+	AddSubTask(taskID int, description string) (int, error)
+	GetSubTasks(taskID int) ([]SubTask, error)
+	ToggleSubTask(id int) error
+	DeleteSubTask(id int) error
+
+	// Закрытие соединения
+	Close() error
 }
