@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 	"todo-app/internal/manager"
+	
 
 	_ "modernc.org/sqlite"
 )
@@ -36,42 +37,61 @@ func NewSQLiteStorage(dbPath string) (*SQLiteStorage, error) {
 }
 
 func createTables(db *sql.DB) error {
-	// Таблица задач
-	createTasksTable := `
-	CREATE TABLE IF NOT EXISTS tasks (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		description TEXT NOT NULL,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		completed BOOLEAN NOT NULL DEFAULT FALSE,
-		priority TEXT NOT NULL DEFAULT 'medium',
-		due_date DATETIME,
-		tags TEXT
-	)`
+    // Таблица пользователей (ДОБАВЛЯЕМ ПЕРВОЙ)
+    createUsersTable := `
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id TEXT UNIQUE NOT NULL,
+        telegram_id INTEGER UNIQUE,
+        fcm_token TEXT,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL
+    )`
 
-	// Таблица подзадач
-	createSubTasksTable := `
-	CREATE TABLE IF NOT EXISTS subtasks (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		task_id INTEGER NOT NULL,
-		description TEXT NOT NULL,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		completed BOOLEAN NOT NULL DEFAULT FALSE,
-		FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
-	)`
+    // Таблица задач (уже существует)
+    createTasksTable := `
+    CREATE TABLE IF NOT EXISTS tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER REFERENCES users(id),
+        description TEXT NOT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        completed BOOLEAN NOT NULL DEFAULT FALSE,
+        priority TEXT NOT NULL DEFAULT 'medium',
+        due_date DATETIME,
+        tags TEXT
+    )`
 
-	_, err := db.Exec(createTasksTable)
-	if err != nil {
-		return fmt.Errorf("ошибка создания таблицы tasks: %v", err)
-	}
+    // Таблица подзадач (уже существует)
+    createSubTasksTable := `
+    CREATE TABLE IF NOT EXISTS subtasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER REFERENCES users(id),
+        task_id INTEGER NOT NULL,
+        description TEXT NOT NULL,
+        created_at DATETIME NOT NULL,
+        updated_at DATETIME NOT NULL,
+        completed BOOLEAN NOT NULL DEFAULT FALSE,
+        FOREIGN KEY (task_id) REFERENCES tasks (id) ON DELETE CASCADE
+    )`
 
-	_, err = db.Exec(createSubTasksTable)
-	if err != nil {
-		return fmt.Errorf("ошибка создания таблицы subtasks: %v", err)
-	}
+    // Создаем таблицы в правильном порядке
+    _, err := db.Exec(createUsersTable)
+    if err != nil {
+        return fmt.Errorf("ошибка создания таблицы users: %v", err)
+    }
 
-	return nil
+    _, err = db.Exec(createTasksTable)
+    if err != nil {
+        return fmt.Errorf("ошибка создания таблицы tasks: %v", err)
+    }
+
+    _, err = db.Exec(createSubTasksTable)
+    if err != nil {
+        return fmt.Errorf("ошибка создания таблицы subtasks: %v", err)
+    }
+
+    return nil
 }
 
 // Закрытие соединения
@@ -81,28 +101,35 @@ func (s *SQLiteStorage) Close() error {
 
 // Методы для работы с задачами
 func (s *SQLiteStorage) AddTask(description string, tags []string) (int, error) {
-	query := `
-	INSERT INTO tasks (description, created_at, updated_at, completed, priority, due_date, tags)
-	VALUES (?, ?, ?, ?, ?, ?, ?)`
+    // Для обратной совместимости - используем user_id = 1
+    return s.AddTaskForUser(1, description, tags)
+}
 
-	now := time.Now()
-	tagsStr := ""
-	if len(tags) > 0 {
-		tagsStr = strings.Join(tags, ",")
-	}
+// AddTaskForUser - новый метод для добавления задач с указанием пользователя
+func (s *SQLiteStorage) AddTaskForUser(userID int, description string, tags []string) (int, error) {
+    query := `
+    INSERT INTO tasks (description, created_at, updated_at, completed, priority, due_date, tags, user_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
-	result, err := s.db.Exec(query, description, now, now, false, "medium", nil, tagsStr)
-	if err != nil {
-		return 0, err
-	}
+    now := time.Now()
+    tagsStr := ""
+    if len(tags) > 0 {
+        tagsStr = strings.Join(tags, ",")
+    }
 
-	id, err := result.LastInsertId()
-	return int(id), err
+    result, err := s.db.Exec(query, 
+        description, now, now, false, "medium", nil, tagsStr, userID)
+    if err != nil {
+        return 0, err
+    }
+
+    id, err := result.LastInsertId()
+    return int(id), err
 }
 
 func (s *SQLiteStorage) GetAllTasks() ([]manager.Task, error) {
 	query := `
-	SELECT id, description, created_at, updated_at, completed, priority, due_date, tags
+	SELECT id, description, created_at, updated_at, completed, priority, due_date, tags, user_id
 	FROM tasks ORDER BY created_at DESC`
 
 	rows, err := s.db.Query(query)
@@ -117,16 +144,17 @@ func (s *SQLiteStorage) GetAllTasks() ([]manager.Task, error) {
 		var dueDate sql.NullTime
 		var tagsStr sql.NullString
 		var priority string
+		var userID int
 
 		err := rows.Scan(
 			&task.ID, &task.Description, &task.CreatedAt, &task.UpdatedAt,
-			&task.Completed, &priority, &dueDate, &tagsStr,
+			&task.Completed, &priority, &dueDate, &tagsStr, &userID,
 		)
 		if err != nil {
 			return nil, err
 		}
 
-		// Конвертируем priority string в Priority тип
+		task.UserID = userID
 		task.Priority = manager.Priority(priority)
 
 		if dueDate.Valid {
@@ -147,17 +175,18 @@ func (s *SQLiteStorage) GetAllTasks() ([]manager.Task, error) {
 
 func (s *SQLiteStorage) GetTask(id int) (*manager.Task, error) {
 	query := `
-	SELECT id, description, created_at, updated_at, completed, priority, due_date, tags
+	SELECT id, description, created_at, updated_at, completed, priority, due_date, tags, user_id
 	FROM tasks WHERE id = ?`
 
 	var task manager.Task
 	var dueDate sql.NullTime
 	var tagsStr sql.NullString
 	var priority string
+	var userID int
 
 	err := s.db.QueryRow(query, id).Scan(
 		&task.ID, &task.Description, &task.CreatedAt, &task.UpdatedAt,
-		&task.Completed, &priority, &dueDate, &tagsStr,
+		&task.Completed, &priority, &dueDate, &tagsStr, &userID,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -166,6 +195,7 @@ func (s *SQLiteStorage) GetTask(id int) (*manager.Task, error) {
 		return nil, err
 	}
 
+	task.UserID = userID
 	task.Priority = manager.Priority(priority)
 
 	if dueDate.Valid {
@@ -349,9 +379,9 @@ func (s *SQLiteStorage) DeleteSubTask(id int) error {
 
 // Методы фильтрации (упрощенные версии)
 func (s *SQLiteStorage) FilterTasks(completed *bool) ([]manager.Task, error) {
-    query := "SELECT id, description, created_at, updated_at, completed, priority, due_date, tags FROM tasks"
+    query := "SELECT id, description, created_at, updated_at, completed, priority, due_date, tags, user_id FROM tasks"
     if completed != nil {
-        query += " WHERE completed = ?"  // ← Правильно: только если completed не nil
+        query += " WHERE completed = ?"
     }
     query += " ORDER BY created_at DESC"
 
@@ -359,9 +389,9 @@ func (s *SQLiteStorage) FilterTasks(completed *bool) ([]manager.Task, error) {
     var err error
 
     if completed != nil {
-        rows, err = s.db.Query(query, *completed)  // ← Правильно
+        rows, err = s.db.Query(query, *completed)
     } else {
-        rows, err = s.db.Query(query)  // ← Правильно: без параметра
+        rows, err = s.db.Query(query)
     }
 
     if err != nil {
@@ -380,15 +410,17 @@ func scanTasks(rows *sql.Rows) ([]manager.Task, error) {
 		var dueDate sql.NullTime
 		var tagsStr sql.NullString
 		var priority string
+		var userID int
 
 		err := rows.Scan(
 			&task.ID, &task.Description, &task.CreatedAt, &task.UpdatedAt,
-			&task.Completed, &priority, &dueDate, &tagsStr,
+			&task.Completed, &priority, &dueDate, &tagsStr, &userID,
 		)
 		if err != nil {
 			return nil, err
 		}
 
+		task.UserID = userID
 		task.Priority = manager.Priority(priority)
 
 		if dueDate.Valid {
@@ -397,6 +429,8 @@ func scanTasks(rows *sql.Rows) ([]manager.Task, error) {
 
 		if tagsStr.Valid && tagsStr.String != "" {
 			task.Tags = strings.Split(tagsStr.String, ",")
+		} else {
+			task.Tags = []string{}
 		}
 
 		tasks = append(tasks, task)
@@ -407,7 +441,7 @@ func scanTasks(rows *sql.Rows) ([]manager.Task, error) {
 
 // Фильтрация по приоритету
 func (s *SQLiteStorage) FilterByPriority(priority manager.Priority) ([]manager.Task, error) {
-	query := "SELECT id, description, created_at, updated_at, completed, priority, due_date, tags FROM tasks WHERE priority = ? ORDER BY created_at DESC"
+	query := "SELECT id, description, created_at, updated_at, completed, priority, due_date, tags, user_id FROM tasks WHERE priority = ? ORDER BY created_at DESC"
 	
 	rows, err := s.db.Query(query, string(priority))
 	if err != nil {
@@ -421,7 +455,7 @@ func (s *SQLiteStorage) FilterByPriority(priority manager.Priority) ([]manager.T
 // Фильтрация по тегу
 func (s *SQLiteStorage) FilterByTag(tag string) ([]manager.Task, error) {
     query := `
-        SELECT id, description, created_at, updated_at, completed, priority, due_date, tags 
+        SELECT id, description, created_at, updated_at, completed, priority, due_date, tags, user_id 
         FROM tasks 
         WHERE tags LIKE ? 
         ORDER BY created_at DESC`
@@ -438,7 +472,7 @@ func (s *SQLiteStorage) FilterByTag(tag string) ([]manager.Task, error) {
 // Предстоящие задачи
 func (s *SQLiteStorage) GetUpcomingTasks(days int) ([]manager.Task, error) {
 	query := `
-	SELECT id, description, created_at, updated_at, completed, priority, due_date, tags 
+	SELECT id, description, created_at, updated_at, completed, priority, due_date, tags, user_id 
 	FROM tasks 
 	WHERE due_date BETWEEN date('now') AND date('now', ? || ' days') 
 	AND completed = false 
@@ -455,7 +489,7 @@ func (s *SQLiteStorage) GetUpcomingTasks(days int) ([]manager.Task, error) {
 
 func (s *SQLiteStorage) FilterByDateRange(start, end time.Time) ([]manager.Task, error) {
     query := `
-        SELECT id, description, created_at, updated_at, completed, priority, due_date, tags 
+        SELECT id, description, created_at, updated_at, completed, priority, due_date, tags, user_id 
         FROM tasks 
         WHERE due_date BETWEEN ? AND ?
         ORDER BY due_date`
@@ -471,7 +505,7 @@ func (s *SQLiteStorage) FilterByDateRange(start, end time.Time) ([]manager.Task,
 
 // FilterTasksAdvanced - расширенная фильтрация
 func (s *SQLiteStorage) FilterTasksAdvanced(options manager.FilterOptions) ([]manager.Task, error) {
-    query := "SELECT id, description, created_at, updated_at, completed, priority, due_date, tags FROM tasks WHERE 1=1"
+    query := "SELECT id, description, created_at, updated_at, completed, priority, due_date, tags, user_id FROM tasks WHERE 1=1"
     var args []interface{}
     
     // Фильтр по статусу
@@ -506,7 +540,7 @@ func (s *SQLiteStorage) FilterTasksAdvanced(options manager.FilterOptions) ([]ma
         args = append(args, *options.EndDate)
     }
     
-    // Фильтр по наличию даты
+    // Фильтр по наличию дата
     if options.HasDueDate != nil {
         if *options.HasDueDate {
             query += " AND due_date IS NOT NULL"
@@ -524,4 +558,122 @@ func (s *SQLiteStorage) FilterTasksAdvanced(options manager.FilterOptions) ([]ma
     defer rows.Close()
 
     return scanTasks(rows)
+}
+
+// 🆕 Методы для работы с пользователями
+func (s *SQLiteStorage) CreateUser(user *manager.User) (int, error) {
+    query := `
+    INSERT INTO users (device_id, telegram_id, fcm_token, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?)`
+
+    result, err := s.db.Exec(query,
+        user.DeviceID,
+        user.TelegramID,
+        user.FCMToken,
+        user.CreatedAt,
+        user.UpdatedAt,
+    )
+    if err != nil {
+        return 0, err
+    }
+
+    id, err := result.LastInsertId()
+    return int(id), err
+}
+
+func (s *SQLiteStorage) GetUserByTelegramID(telegramID int64) (*manager.User, error) {
+    query := `SELECT id, device_id, telegram_id, fcm_token, created_at, updated_at 
+              FROM users WHERE telegram_id = ?`
+
+    var user manager.User
+    err := s.db.QueryRow(query, telegramID).Scan(
+        &user.ID,
+        &user.DeviceID,
+        &user.TelegramID,
+        &user.FCMToken,
+        &user.CreatedAt,
+        &user.UpdatedAt,
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    return &user, nil
+}
+
+func (s *SQLiteStorage) GetAllTasksForUser(userID int) ([]manager.Task, error) {
+    query := `
+    SELECT id, description, created_at, updated_at, completed, priority, due_date, tags, user_id
+    FROM tasks WHERE user_id = ? ORDER BY created_at DESC`
+
+    rows, err := s.db.Query(query, userID)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    return scanTasks(rows)
+}
+
+func (s *SQLiteStorage) GetUserByDeviceID(deviceID string) (*manager.User, error) {
+    query := `SELECT id, device_id, telegram_id, fcm_token, created_at, updated_at 
+              FROM users WHERE device_id = ?`
+
+    var user manager.User
+    err := s.db.QueryRow(query, deviceID).Scan(
+        &user.ID,
+        &user.DeviceID,
+        &user.TelegramID,
+        &user.FCMToken,
+        &user.CreatedAt,
+        &user.UpdatedAt,
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    return &user, nil
+}
+
+func (s *SQLiteStorage) UpdateUser(user *manager.User) error {
+    query := `
+    UPDATE users 
+    SET device_id = ?, telegram_id = ?, fcm_token = ?, updated_at = ?
+    WHERE id = ?`
+
+    _, err := s.db.Exec(query,
+        user.DeviceID,
+        user.TelegramID,
+        user.FCMToken,
+        time.Now(),
+        user.ID,
+    )
+    return err
+}
+
+func (s *SQLiteStorage) GetUserByID(userID int) (*manager.User, error) {
+    query := `SELECT id, device_id, telegram_id, fcm_token, created_at, updated_at 
+              FROM users WHERE id = ?`
+
+    var user manager.User
+    err := s.db.QueryRow(query, userID).Scan(
+        &user.ID,
+        &user.DeviceID,
+        &user.TelegramID,
+        &user.FCMToken,
+        &user.CreatedAt,
+        &user.UpdatedAt,
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    return &user, nil
+}
+
+func (s *SQLiteStorage) MigrateExistingTasksToUser(userID int, deviceID string) error {
+	// Привязываем все существующие задачи к пользователю
+	query := `UPDATE tasks SET user_id = ? WHERE user_id IS NULL OR user_id = 1`
+	_, err := s.db.Exec(query, userID)
+	return err
 }

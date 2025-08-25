@@ -7,30 +7,35 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	//"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
 	"todo-app/internal/logger"
 	"todo-app/internal/manager"
-	"todo-app/internal/storage" // 🆕 Добавляем этот импорт!
+	"todo-app/internal/storage"
 )
 
 type Bot struct {
 	api         *tgbotapi.BotAPI
 	taskManager *manager.TaskManager
+	storage     manager.Storage
+	userManager *manager.UserManager
 }
 
-func NewBot(token string, tm *manager.TaskManager) (*Bot, error) {
+func NewBot(token string, tm *manager.TaskManager, storage manager.Storage, um *manager.UserManager) (*Bot, error) {
 	bot, err := tgbotapi.NewBotAPI(token)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка создания бота: %v", err)
 	}
 
-	bot.Debug = true // Режим отладки
+	bot.Debug = true
 	log.Printf("Авторизован как %s", bot.Self.UserName)
 
 	return &Bot{
 		api:         bot,
 		taskManager: tm,
+		storage:     storage,
+		userManager: um,
 	}, nil
 }
 
@@ -62,24 +67,22 @@ func (b *Bot) handleMessage(msg *tgbotapi.Message) {
 		"text", msg.Text,
 	)
 
-	// Обрабатываем команды
 	if msg.IsCommand() {
 		b.handleCommand(msg)
 		return
 	}
 
-	// Обрабатываем обычные сообщения
 	b.handleTextMessage(msg)
 }
 
 func (b *Bot) handleCommand(msg *tgbotapi.Message) {
 	switch msg.Command() {
 	case "start":
-		b.sendWelcomeMessage(msg.Chat.ID)
+		b.handleStartCommand(msg)
 	case "add":
 		b.addTask(msg)
 	case "list":
-		b.listTasks(msg.Chat.ID)
+		b.handleListCommand(msg)
 	case "done":
 		b.completeTask(msg)
 	case "delete":
@@ -92,13 +95,19 @@ func (b *Bot) handleCommand(msg *tgbotapi.Message) {
 }
 
 func (b *Bot) handleTextMessage(msg *tgbotapi.Message) {
-	// Автоматически добавляем задачу из текста
 	if strings.TrimSpace(msg.Text) != "" {
-		b.addTaskFromText(msg.Chat.ID, msg.Text)
+		b.addTaskFromText(msg.Chat.ID, msg.From.ID, msg.Text)
 	}
 }
 
-func (b *Bot) sendWelcomeMessage(chatID int64) {
+func (b *Bot) handleStartCommand(msg *tgbotapi.Message) {
+    // Создаем или получаем пользователя
+    _, err := b.userManager.GetOrCreateUserByTelegramID(int64(msg.From.ID))
+    if err != nil {
+        b.sendMessage(msg.Chat.ID, "❌ Ошибка создания пользователя: " + err.Error())
+        return
+    }
+
 	text := `🎯 *Добро пожаловать в TodoBot!*
 
 *Доступные команды:*
@@ -113,67 +122,38 @@ func (b *Bot) sendWelcomeMessage(chatID int64) {
 /add Создать отчет до пятницы 🚀
 /done 1`
 
-	b.sendMessage(chatID, text)
+	b.sendMessage(msg.Chat.ID, text)
 }
 
-func (b *Bot) addTask(msg *tgbotapi.Message) {
-	args := msg.CommandArguments()
-	if args == "" {
-		b.sendMessage(msg.Chat.ID, "Укажите задачу после команды: /add Купить молоко")
-		return
-	}
+func (b *Bot) handleListCommand(msg *tgbotapi.Message) {
+    // ВСЕГДА используем default пользователя
+    defaultUser, err := b.userManager.GetUserByDeviceID("default_legacy_user")
+    if err != nil {
+        b.sendMessage(msg.Chat.ID, "❌ Ошибка: система не настроена")
+        return
+    }
 
-	b.addTaskFromText(msg.Chat.ID, args)
-}
+    tasks, err := b.taskManager.GetAllTasksForUser(defaultUser.ID)
+    if err != nil {
+        b.sendMessage(msg.Chat.ID, "❌ Ошибка загрузки задач: "+err.Error())
+        return
+    }
 
-func (b *Bot) addTaskFromText(chatID int64, text string) {
-	// Парсим теги из текста
-	var tags []string
-	description := text
-	
-	if strings.Contains(description, "#") {
-		words := strings.Fields(description)
-		for _, word := range words {
-			if strings.HasPrefix(word, "#") {
-				tags = append(tags, strings.TrimPrefix(word, "#"))
-			}
-		}
-		// Убираем теги из описания
-		description = strings.TrimSpace(strings.ReplaceAll(description, "#", ""))
-	}
+    if len(tasks) == 0 {
+        b.sendMessage(msg.Chat.ID, "📭 Список задач пуст")
+        return
+    }
 
-	taskID, err := b.taskManager.AddTask(description, tags)
-	if err != nil {
-		b.sendMessage(chatID, "❌ Ошибка: "+err.Error())
-		return
-	}
-
-	response := fmt.Sprintf("✅ *Задача добавлена!*\n\nID: #%d\nЗадача: %s", taskID, description)
-	if len(tags) > 0 {
-		response += fmt.Sprintf("\nТеги: %s", strings.Join(tags, ", "))
-	}
-
-	b.sendMessage(chatID, response)
-}
-
-func (b *Bot) listTasks(chatID int64) {
-	tasks := b.taskManager.GetAllTasks()
-	
-	if len(tasks) == 0 {
-		b.sendMessage(chatID, "📭 Список задач пуст")
-		return
-	}
-
+	// Формируем список задач
 	var response strings.Builder
 	response.WriteString("📋 *Ваши задачи:*\n\n")
-
-	for _, task := range tasks {
-		status := "🟢"
+	
+	for i, task := range tasks {
+		status := "❌"
 		if task.Completed {
 			status = "✅"
 		}
-
-		// Эмодзи приоритета
+		
 		priorityEmoji := "⚪"
 		switch task.Priority {
 		case manager.PriorityLow:
@@ -184,17 +164,75 @@ func (b *Bot) listTasks(chatID int64) {
 			priorityEmoji = "🔴"
 		}
 
-		response.WriteString(fmt.Sprintf("%s%s #%d: %s", status, priorityEmoji, task.ID, task.Description))
+		response.WriteString(fmt.Sprintf("%d. %s%s %s", i+1, status, priorityEmoji, task.Description))
 
-		// Добавляем теги
 		if len(task.Tags) > 0 {
 			response.WriteString(fmt.Sprintf(" \\#%s", strings.Join(task.Tags, " \\#")))
+		}
+
+		if !task.DueDate.IsZero() {
+			response.WriteString(fmt.Sprintf("\n   📅 %s", task.DueDate.Format("02.01.2006")))
 		}
 
 		response.WriteString("\n\n")
 	}
 
-	b.sendMessage(chatID, response.String())
+	b.sendMessage(msg.Chat.ID, response.String())
+}
+
+func (b *Bot) addTask(msg *tgbotapi.Message) {
+	args := msg.CommandArguments()
+	if args == "" {
+		b.sendMessage(msg.Chat.ID, "Укажите задачу после команды: /add Купить молоко")
+		return
+	}
+
+	b.addTaskFromText(msg.Chat.ID, msg.From.ID, args)
+}
+
+func (b *Bot) addTaskFromText(chatID int64, userID int, text string) {
+    // ВСЕГДА используем default пользователя из веб-интерфейса
+    defaultUser, err := b.userManager.GetUserByDeviceID("default_legacy_user")
+    if err != nil {
+        // Если default пользователь не найден, создаем его
+        defaultUser, err = b.userManager.CreateUser("default_legacy_user", 0)
+        if err != nil {
+            b.sendMessage(chatID, "❌ Ошибка создания пользователя: "+err.Error())
+            return
+        }
+    }
+
+    var tags []string
+    description := text
+    
+    // Парсим теги
+    if strings.Contains(description, "#") {
+        words := strings.Fields(description)
+        for _, word := range words {
+            if strings.HasPrefix(word, "#") {
+                tags = append(tags, strings.TrimPrefix(word, "#"))
+            }
+        }
+        description = strings.TrimSpace(strings.ReplaceAll(description, "#", ""))
+        for _, tag := range tags {
+            description = strings.ReplaceAll(description, tag, "")
+        }
+        description = strings.TrimSpace(description)
+    }
+
+    // Добавляем задачу для default пользователя
+    taskID, err := b.taskManager.AddTaskForUser(defaultUser.ID, description, tags)
+    if err != nil {
+        b.sendMessage(chatID, "❌ Ошибка: "+err.Error())
+        return
+    }
+
+    response := fmt.Sprintf("✅ *Задача добавлена!*\n\nID: #%d\nЗадача: %s", taskID, description)
+    if len(tags) > 0 {
+        response += fmt.Sprintf("\nТеги: %s", strings.Join(tags, ", "))
+    }
+
+    b.sendMessage(chatID, response)
 }
 
 func (b *Bot) completeTask(msg *tgbotapi.Message) {
@@ -275,13 +313,11 @@ func main() {
 	logger.SetLevel(logger.LevelInfo)
 	logger.Info(ctx, "Запуск Telegram-бота...")
 
-	// 🆕 Создаем директорию data если её нет
 	if err := os.MkdirAll("data", 0755); err != nil {
 		logger.Error(ctx, err, "Ошибка создания директории data")
 		return
 	}
 
-	// 🆕 Инициализируем SQLite хранилище
 	dbStorage, err := storage.NewSQLiteStorage("./data/todoapp.db")
 	if err != nil {
 		logger.Error(ctx, err, "Ошибка инициализации SQLite хранилища")
@@ -291,13 +327,16 @@ func main() {
 
 	logger.Info(ctx, "SQLite хранилище успешно инициализировано")
 
-	// 🆕 Создаем менеджер с хранилищем
 	taskManager := manager.NewTaskManagerWithStorage(dbStorage)
+	userManager := manager.NewUserManager(dbStorage)
 
-	// Токен бота (ЗАМЕНИТЕ на реальный токен!)
-	botToken := " "
+	// Токен бота
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	if botToken == "" {
+		botToken = "MY_TELEGRAM_TOKEN" // fallback
+	}
 
-	bot, err := NewBot(botToken, taskManager)
+	bot, err := NewBot(botToken, taskManager, dbStorage, userManager)
 	if err != nil {
 		logger.Error(ctx, err, "Ошибка создания бота")
 		return

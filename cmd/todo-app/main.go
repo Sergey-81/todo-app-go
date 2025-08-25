@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/json" // Добавьте этот импорт
+	"encoding/json"
 	"html/template"
 	"net/http"
 	"os"
@@ -17,7 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"todo-app/internal/logger"
 	"todo-app/internal/manager"
-	"todo-app/internal/storage" // 🆕 Добавляем этот импорт!
+	"todo-app/internal/storage"
 )
 
 type TemplateData struct {
@@ -78,13 +78,11 @@ func main() {
 	printWelcomeMessage()
 	logger.Info(ctx, "Starting todo-app server...")
 
-// 🆕 Создаем директорию data если её нет
 	if err := os.MkdirAll("data", 0755); err != nil {
 		logger.Error(ctx, err, "Ошибка создания директории data")
 		return
 	}
 
-	// 🆕 Инициализируем SQLite хранилище
 	dbStorage, err := storage.NewSQLiteStorage("./data/todoapp.db")
 	if err != nil {
 		logger.Error(ctx, err, "Ошибка инициализации SQLite хранилища")
@@ -94,17 +92,675 @@ func main() {
 
 	logger.Info(ctx, "SQLite хранилище успешно инициализировано")
 
-	// 🆕 Создаем менеджер с хранилищем
 	taskManager := manager.NewTaskManagerWithStorage(dbStorage)
-
-	// 🆕 Для подзадач пока используем старый менеджер (будем обновлять постепенно)
+	userManager := manager.NewUserManager(dbStorage)
 	subTaskManager := manager.NewSubTaskManager()
 
-//	tm := manager.NewTaskManager()
-//	stm := manager.NewSubTaskManager() // Добавляем менеджер подзадач
-
 	r := chi.NewRouter()
-	setupRoutes(r, taskManager, subTaskManager)
+	
+	// Middleware аутентификации ПЕРВЫМ
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user, err := userManager.GetUserByDeviceID("default_legacy_user")
+			if err != nil {
+				user, err = userManager.CreateUser("default_legacy_user", 0)
+				if err != nil {
+					logger.Error(r.Context(), err, "Ошибка создания пользователя")
+					http.Error(w, "Internal server error", http.StatusInternalServerError)
+					return
+				}
+			}
+			
+			ctx := context.WithValue(r.Context(), "user", user)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	})
+
+	// Затем роуты
+	r.Handle("/metrics", promhttp.Handler())
+
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value("user").(*manager.User)
+		if !ok {
+			http.Error(w, "User not found", http.StatusInternalServerError)
+			return
+		}
+		
+		tasks, err := taskManager.GetAllTasksForUser(user.ID)
+		if err != nil {
+			http.Error(w, "Ошибка загрузки задач", http.StatusInternalServerError)
+			return
+		}
+		
+		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
+		data := TemplateData{Tasks: tasks}
+		tmpl.Execute(w, data)
+	})
+
+	r.Get("/tasks/filter/{status}", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value("user").(*manager.User)
+		if !ok {
+			http.Error(w, "User not found", http.StatusInternalServerError)
+			return
+		}
+
+		status := chi.URLParam(r, "status")
+		var completed *bool
+		switch status {
+		case "completed":
+			val := true
+			completed = &val
+		case "active":
+			val := false
+			completed = &val
+		case "all":
+			completed = nil
+		default:
+			http.Error(w, "Недопустимый статус фильтра", http.StatusBadRequest)
+			return
+		}
+		
+		tasks, err := taskManager.GetAllTasksForUser(user.ID)
+		if err != nil {
+			http.Error(w, "Ошибка загрузки задач", http.StatusInternalServerError)
+			return
+		}
+		var filteredTasks []manager.Task
+		for _, task := range tasks {
+			if completed == nil || task.Completed == *completed {
+				filteredTasks = append(filteredTasks, task)
+			}
+		}
+		
+		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
+		tmpl.Execute(w, TemplateData{Tasks: filteredTasks})
+	})
+
+	r.Get("/tasks/priority/{priority}", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value("user").(*manager.User)
+		if !ok {
+			http.Error(w, "User not found", http.StatusInternalServerError)
+			return
+		}
+
+		priority := manager.Priority(chi.URLParam(r, "priority"))
+		if priority != manager.PriorityLow && priority != manager.PriorityMedium && priority != manager.PriorityHigh {
+			http.Error(w, "Недопустимый приоритет", http.StatusBadRequest)
+			return
+		}
+		
+		tasks, err := taskManager.GetAllTasksForUser(user.ID)
+		if err != nil {
+			http.Error(w, "Ошибка загрузки задач", http.StatusInternalServerError)
+			return
+		}
+		var filteredTasks []manager.Task
+		for _, task := range tasks {
+			if task.Priority == priority {
+				filteredTasks = append(filteredTasks, task)
+			}
+		}
+		
+		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
+		tmpl.Execute(w, TemplateData{Tasks: filteredTasks})
+	})
+
+	r.Get("/tasks/tag/{tag}", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value("user").(*manager.User)
+		if !ok {
+			http.Error(w, "User not found", http.StatusInternalServerError)
+			return
+		}
+
+		tag := chi.URLParam(r, "tag")
+		tasks, err := taskManager.GetAllTasksForUser(user.ID)
+		if err != nil {
+			http.Error(w, "Ошибка загрузки задач", http.StatusInternalServerError)
+			return
+		}
+		var filteredTasks []manager.Task
+		for _, task := range tasks {
+			for _, taskTag := range task.Tags {
+				if strings.EqualFold(taskTag, tag) {
+					filteredTasks = append(filteredTasks, task)
+					break
+				}
+			}
+		}
+		
+		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
+		tmpl.Execute(w, TemplateData{Tasks: filteredTasks})
+	})
+
+	r.Get("/tasks/upcoming/{days}", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value("user").(*manager.User)
+		if !ok {
+			http.Error(w, "User not found", http.StatusInternalServerError)
+			return
+		}
+
+		daysStr := chi.URLParam(r, "days")
+		days, err := strconv.Atoi(daysStr)
+		if err != nil || days < 1 {
+			http.Error(w, "Недопустимое количество дней", http.StatusBadRequest)
+			return
+		}
+		
+		tasks, err := taskManager.GetAllTasksForUser(user.ID)
+		if err != nil {
+			http.Error(w, "Ошибка загрузки задач", http.StatusInternalServerError)
+			return
+		}
+		now := time.Now()
+		var filteredTasks []manager.Task
+		for _, task := range tasks {
+			if !task.DueDate.IsZero() && !task.Completed {
+				daysUntilDue := int(task.DueDate.Sub(now).Hours() / 24)
+				if daysUntilDue >= 0 && daysUntilDue <= days {
+					filteredTasks = append(filteredTasks, task)
+				}
+			}
+		}
+		
+		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
+		tmpl.Execute(w, TemplateData{Tasks: filteredTasks})
+	})
+
+	r.Post("/tasks", func(w http.ResponseWriter, r *http.Request) {
+    // ДОБАВИТЬ - получить пользователя из контекста
+    user, ok := r.Context().Value("user").(*manager.User)
+    if !ok {
+        http.Error(w, "User not found", http.StatusInternalServerError)
+        return
+    }
+
+    startTime := time.Now()
+    description := r.FormValue("description")
+    priority := manager.Priority(r.FormValue("priority"))
+    dueDateStr := r.FormValue("due_date")
+    tagsStr := r.FormValue("tags")
+    
+    if description == "" {
+        manager.AddTaskCount.WithLabelValues("error").Inc()
+        http.Error(w, "Описание задачи обязательно", http.StatusBadRequest)
+        return
+    }
+
+    if priority != manager.PriorityLow && priority != manager.PriorityMedium && priority != manager.PriorityHigh {
+        priority = manager.PriorityMedium
+    }
+
+    var dueDate time.Time
+    if dueDateStr != "" {
+        var err error
+        dueDate, err = time.Parse("2006-01-02", dueDateStr)
+        if err != nil {
+            http.Error(w, "Некорректная дата выполнения", http.StatusBadRequest)
+            return
+        }
+    }
+
+    var tags []string
+    if tagsStr != "" {
+        tags = strings.Split(tagsStr, ",")
+        for i := range tags {
+            tags[i] = strings.TrimSpace(tags[i])
+        }
+    }
+
+    // ИЗМЕНИТЬ эту строку:
+    taskID, err := taskManager.AddTaskForUser(user.ID, description, tags)
+    if err != nil {
+        manager.AddTaskCount.WithLabelValues("error").Inc()
+        http.Error(w, err.Error(), http.StatusBadRequest)
+        return
+    }
+
+    _, err = taskManager.UpdateTask(taskID, manager.UpdateTaskRequest{
+        Priority: &priority,
+        DueDate:  &dueDate,
+    })
+    if err != nil {
+        manager.AddTaskCount.WithLabelValues("error").Inc()
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    manager.AddTaskCount.WithLabelValues("success").Inc()
+    manager.AddTaskDuration.Observe(time.Since(startTime).Seconds())
+    manager.TaskDescLength.Observe(float64(len(description)))
+    http.Redirect(w, r, "/", http.StatusSeeOther)
+})
+
+	r.Post("/tasks/toggle/{id}", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value("user").(*manager.User)
+		if !ok {
+			http.Error(w, "User not found", http.StatusInternalServerError)
+			return
+		}
+
+		startTime := time.Now()
+		idStr := chi.URLParam(r, "id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			manager.UpdateTaskCount.WithLabelValues("error").Inc()
+			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
+			return
+		}
+		
+		tasks, err := taskManager.GetAllTasksForUser(user.ID)
+		if err != nil {
+			http.Error(w, "Ошибка загрузки задач", http.StatusInternalServerError)
+			return
+		}
+		taskFound := false
+		for _, task := range tasks {
+			if task.ID == id {
+				taskFound = true
+				break
+			}
+		}
+		if !taskFound {
+			http.Error(w, "Задача не найдена", http.StatusNotFound)
+			return
+		}
+		
+		_, err = taskManager.ToggleComplete(id)
+		if err != nil {
+			manager.UpdateTaskCount.WithLabelValues("error").Inc()
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		manager.UpdateTaskCount.WithLabelValues("success").Inc()
+		manager.UpdateTaskDuration.Observe(time.Since(startTime).Seconds())
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+
+	r.Post("/tasks/update/{id}", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value("user").(*manager.User)
+		if !ok {
+			http.Error(w, "User not found", http.StatusInternalServerError)
+			return
+		}
+
+		startTime := time.Now()
+		idStr := chi.URLParam(r, "id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			manager.UpdateTaskCount.WithLabelValues("error").Inc()
+			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
+			return
+		}
+		
+		tasks, err := taskManager.GetAllTasksForUser(user.ID)
+		if err != nil {
+			http.Error(w, "Ошибка загрузки задач", http.StatusInternalServerError)
+			return
+		}
+		taskFound := false
+		for _, task := range tasks {
+			if task.ID == id {
+				taskFound = true
+				break
+			}
+		}
+		if !taskFound {
+			http.Error(w, "Задача не найдена", http.StatusNotFound)
+			return
+		}
+		
+		description := r.FormValue("description")
+		if description == "" {
+			manager.UpdateTaskCount.WithLabelValues("error").Inc()
+			http.Error(w, "Описание задачи обязательно", http.StatusBadRequest)
+			return
+		}
+		priority := manager.Priority(r.FormValue("priority"))
+		dueDateStr := r.FormValue("due_date")
+		tagsStr := r.FormValue("tags")
+		var dueDate time.Time
+		if dueDateStr != "" {
+			dueDate, err = time.Parse("2006-01-02", dueDateStr)
+			if err != nil {
+				http.Error(w, "Некорректная дата выполнения", http.StatusBadRequest)
+				return
+			}
+		}
+		var tags []string
+		if tagsStr != "" {
+			tags = strings.Split(tagsStr, ",")
+			for i := range tags {
+				tags[i] = strings.TrimSpace(tags[i])
+			}
+		}
+		_, err = taskManager.UpdateTask(id, manager.UpdateTaskRequest{
+			Description: &description,
+			Priority:    &priority,
+			DueDate:     &dueDate,
+			Tags:        &tags,
+		})
+		if err != nil {
+			manager.UpdateTaskCount.WithLabelValues("error").Inc()
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		manager.UpdateTaskCount.WithLabelValues("success").Inc()
+		manager.UpdateTaskDuration.Observe(time.Since(startTime).Seconds())
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+
+	r.Post("/tasks/delete/{id}", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value("user").(*manager.User)
+		if !ok {
+			http.Error(w, "User not found", http.StatusInternalServerError)
+			return
+		}
+
+		startTime := time.Now()
+		idStr := chi.URLParam(r, "id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			manager.DeleteTaskCount.WithLabelValues("error").Inc()
+			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
+			return
+		}
+		
+		tasks, err := taskManager.GetAllTasksForUser(user.ID)
+		if err != nil {
+			http.Error(w, "Ошибка загрузки задач", http.StatusInternalServerError)
+			return
+		}
+		taskFound := false
+		for _, task := range tasks {
+			if task.ID == id {
+				taskFound = true
+				break
+			}
+		}
+		if !taskFound {
+			http.Error(w, "Задача не найдена", http.StatusNotFound)
+			return
+		}
+		
+		if err := taskManager.DeleteTask(id); err != nil {
+			manager.DeleteTaskCount.WithLabelValues("error").Inc()
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		manager.DeleteTaskCount.WithLabelValues("success").Inc()
+		manager.DeleteTaskDuration.Observe(time.Since(startTime).Seconds())
+		http.Redirect(w, r, "/", http.StatusSeeOther)
+	})
+
+	r.Get("/tasks/filter/date", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value("user").(*manager.User)
+		if !ok {
+			http.Error(w, "User not found", http.StatusInternalServerError)
+			return
+		}
+
+		startStr := r.URL.Query().Get("start")
+		endStr := r.URL.Query().Get("end")
+		
+		parseRussianDate := func(dateStr string) (time.Time, error) {
+			return time.Parse("02.01.2006", dateStr)
+		}
+		
+		start, err := parseRussianDate(startStr)
+		if err != nil {
+			http.Error(w, "Неверный формат начальной даты", http.StatusBadRequest)
+			return
+		}
+		
+		end, err := parseRussianDate(endStr)
+		if err != nil {
+			http.Error(w, "Неверный формат конечной даты", http.StatusBadRequest)
+			return
+		}
+
+		tasks, err := taskManager.GetAllTasksForUser(user.ID)
+		if err != nil {
+			http.Error(w, "Ошибка загрузки задач", http.StatusInternalServerError)
+			return
+		}
+		var filteredTasks []manager.Task
+		for _, task := range tasks {
+			if !task.DueDate.IsZero() && !task.DueDate.Before(start) && !task.DueDate.After(end) {
+				filteredTasks = append(filteredTasks, task)
+			}
+		}
+		
+		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
+		tmpl.Execute(w, TemplateData{Tasks: filteredTasks})
+	})
+
+	// Подзадачи
+	r.Get("/tasks/{taskID}/subtasks", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value("user").(*manager.User)
+		if !ok {
+			http.Error(w, "User not found", http.StatusInternalServerError)
+			return
+		}
+
+		taskIDStr := chi.URLParam(r, "taskID")
+		taskID, err := strconv.Atoi(taskIDStr)
+		if err != nil {
+			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
+			return
+		}
+		
+		tasks, err := taskManager.GetAllTasksForUser(user.ID)
+		if err != nil {
+			http.Error(w, "Ошибка загрузки задач", http.StatusInternalServerError)
+			return
+		}
+		taskFound := false
+		for _, task := range tasks {
+			if task.ID == taskID {
+				taskFound = true
+				break
+			}
+		}
+		if !taskFound {
+			http.Error(w, "Задача не найдена", http.StatusNotFound)
+			return
+		}
+		
+		subtasks := subTaskManager.GetSubTasks(taskID)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(subtasks)
+	})
+	
+	r.Post("/tasks/{taskID}/subtasks", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value("user").(*manager.User)
+		if !ok {
+			http.Error(w, "User not found", http.StatusInternalServerError)
+			return
+		}
+
+		taskIDStr := chi.URLParam(r, "taskID")
+		taskID, err := strconv.Atoi(taskIDStr)
+		if err != nil {
+			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
+			return
+		}
+		
+		tasks, err := taskManager.GetAllTasksForUser(user.ID)
+		if err != nil {
+			http.Error(w, "Ошибка загрузки задач", http.StatusInternalServerError)
+			return
+		}
+		taskFound := false
+		for _, task := range tasks {
+			if task.ID == taskID {
+				taskFound = true
+				break
+			}
+		}
+		if !taskFound {
+			http.Error(w, "Задача не найдена", http.StatusNotFound)
+			return
+		}
+		
+		description := r.FormValue("description")
+		if description == "" {
+			http.Error(w, "Описание подзадачи обязательно", http.StatusBadRequest)
+			return
+		}
+		
+		id, err := subTaskManager.AddSubTask(taskID, description)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]int{"id": id})
+	})
+	
+	r.Post("/subtasks/{id}/toggle", func(w http.ResponseWriter, r *http.Request) {
+		idStr := chi.URLParam(r, "id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			http.Error(w, "Неверный ID подзадачи", http.StatusBadRequest)
+			return
+		}
+		
+		if err := subTaskManager.ToggleSubTask(id); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		
+		w.WriteHeader(http.StatusOK)
+	})
+	
+	r.Delete("/subtasks/{id}", func(w http.ResponseWriter, r *http.Request) {
+		idStr := chi.URLParam(r, "id")
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			http.Error(w, "Неверный ID подзадачи", http.StatusBadRequest)
+			return
+		}
+		
+		if err := subTaskManager.DeleteSubTask(id); err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		
+		w.WriteHeader(http.StatusOK)
+	})
+
+	r.Get("/tasks/filter/advanced", func(w http.ResponseWriter, r *http.Request) {
+		user, ok := r.Context().Value("user").(*manager.User)
+		if !ok {
+			http.Error(w, "User not found", http.StatusInternalServerError)
+			return
+		}
+
+		query := r.URL.Query()
+		options := manager.FilterOptions{}
+		
+		if completedStr := query.Get("completed"); completedStr != "" {
+			completed := completedStr == "true"
+			options.Completed = &completed
+		}
+		
+		if priorityStr := query.Get("priority"); priorityStr != "" {
+			priority := manager.Priority(priorityStr)
+			if priority == manager.PriorityLow || priority == manager.PriorityMedium || priority == manager.PriorityHigh {
+				options.Priority = &priority
+			}
+		}
+		
+		if tagsStr := query.Get("tags"); tagsStr != "" {
+			rawTags := strings.Split(tagsStr, ",")
+			options.Tags = make([]string, 0)
+			for _, tag := range rawTags {
+				tag = strings.TrimSpace(tag)
+				if tag != "" {
+					options.Tags = append(options.Tags, tag)
+				}
+			}
+		}
+		
+		if startStr := query.Get("start_date"); startStr != "" {
+			if start, err := time.Parse("02.01.2006", startStr); err == nil {
+				options.StartDate = &start
+			}
+		}
+		
+		if endStr := query.Get("end_date"); endStr != "" {
+			if end, err := time.Parse("02.01.2006", endStr); err == nil {
+				options.EndDate = &end
+			}
+		}
+		
+		if hasDueDateStr := query.Get("has_due_date"); hasDueDateStr != "" {
+			hasDueDate := hasDueDateStr == "true"
+			options.HasDueDate = &hasDueDate
+		}
+		
+		tasks, err := taskManager.GetAllTasksForUser(user.ID)
+		if err != nil {
+			http.Error(w, "Ошибка загрузки задач", http.StatusInternalServerError)
+			return
+		}
+		var filteredTasks []manager.Task
+		
+		for _, task := range tasks {
+			if options.Completed != nil && task.Completed != *options.Completed {
+				continue
+			}
+			
+			if options.Priority != nil && task.Priority != *options.Priority {
+				continue
+			}
+			
+			if len(options.Tags) > 0 {
+				hasMatchingTag := false
+				for _, filterTag := range options.Tags {
+					filterTag = strings.TrimSpace(strings.ToLower(filterTag))
+					for _, taskTag := range task.Tags {
+						if strings.ToLower(taskTag) == filterTag {
+							hasMatchingTag = true
+							break
+						}
+					}
+					if hasMatchingTag {
+						break
+					}
+				}
+				if !hasMatchingTag {
+					continue
+				}
+			}
+			
+			if options.HasDueDate != nil {
+				hasDueDate := !task.DueDate.IsZero()
+				if hasDueDate != *options.HasDueDate {
+					continue
+				}
+			}
+			
+			if options.StartDate != nil || options.EndDate != nil {
+				if task.DueDate.IsZero() {
+					continue
+				}
+				
+				if options.StartDate != nil && task.DueDate.Before(*options.StartDate) {
+					continue
+				}
+				if options.EndDate != nil && task.DueDate.After(*options.EndDate) {
+					continue
+				}
+			}
+			
+			filteredTasks = append(filteredTasks, task)
+		}
+		
+		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
+		tmpl.Execute(w, TemplateData{Tasks: filteredTasks})
+	})
 
 	server := &http.Server{
 		Addr:    ":8080",
@@ -130,371 +786,4 @@ func main() {
 		logger.Error(ctx, err, "Server shutdown error")
 	}
 	logger.Info(ctx, "Server stopped")
-}
-
-func setupRoutes(r *chi.Mux, tm *manager.TaskManager, stm *manager.SubTaskManager) {
-	r.Handle("/metrics", promhttp.Handler())
-
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
-		data := TemplateData{
-			Tasks: tm.GetAllTasks(),
-		}
-		tmpl.Execute(w, data)
-	})
-
-	r.Get("/tasks/filter/{status}", func(w http.ResponseWriter, r *http.Request) {
-		status := chi.URLParam(r, "status")
-		var completed *bool
-		switch status {
-		case "completed":
-			val := true
-			completed = &val
-		case "active":
-			val := false
-			completed = &val
-		case "all":
-			completed = nil
-		default:
-			http.Error(w, "Недопустимый статус фильтра", http.StatusBadRequest)
-			return
-		}
-		tasks := tm.FilterTasks(completed)
-		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
-		tmpl.Execute(w, TemplateData{Tasks: tasks})
-	})
-
-	r.Get("/tasks/priority/{priority}", func(w http.ResponseWriter, r *http.Request) {
-		priority := manager.Priority(chi.URLParam(r, "priority"))
-		if priority != manager.PriorityLow && 
-		   priority != manager.PriorityMedium && 
-		   priority != manager.PriorityHigh {
-			http.Error(w, "Недопустимый приоритет", http.StatusBadRequest)
-			return
-		}
-		tasks := tm.FilterByPriority(priority)
-		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
-		tmpl.Execute(w, TemplateData{Tasks: tasks})
-	})
-
-	r.Get("/tasks/tag/{tag}", func(w http.ResponseWriter, r *http.Request) {
-		tag := chi.URLParam(r, "tag")
-		tasks := tm.FilterByTag(tag)
-		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
-		tmpl.Execute(w, TemplateData{Tasks: tasks})
-	})
-
-	r.Get("/tasks/upcoming/{days}", func(w http.ResponseWriter, r *http.Request) {
-		daysStr := chi.URLParam(r, "days")
-		days, err := strconv.Atoi(daysStr)
-		if err != nil || days < 1 {
-			http.Error(w, "Недопустимое количество дней", http.StatusBadRequest)
-			return
-		}
-		tasks := tm.GetUpcomingTasks(days)
-		tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
-		tmpl.Execute(w, TemplateData{Tasks: tasks})
-	})
-
-	r.Post("/tasks", func(w http.ResponseWriter, r *http.Request) {
-		startTime := time.Now()
-		description := r.FormValue("description")
-		priority := manager.Priority(r.FormValue("priority"))
-		dueDateStr := r.FormValue("due_date")
-		tagsStr := r.FormValue("tags")
-		
-		if description == "" {
-			manager.AddTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, "Описание задачи обязательно", http.StatusBadRequest)
-			return
-		}
-
-		if priority != manager.PriorityLow && 
-		   priority != manager.PriorityMedium && 
-		   priority != manager.PriorityHigh {
-			priority = manager.PriorityMedium
-		}
-
-		var dueDate time.Time
-		if dueDateStr != "" {
-			var err error
-			dueDate, err = time.Parse("2006-01-02", dueDateStr)
-			if err != nil {
-				http.Error(w, "Некорректная дата выполнения", http.StatusBadRequest)
-				return
-			}
-		}
-
-		var tags []string
-		if tagsStr != "" {
-			tags = strings.Split(tagsStr, ",")
-			for i := range tags {
-				tags[i] = strings.TrimSpace(tags[i])
-			}
-		}
-
-		taskID, err := tm.AddTask(description, tags)
-		if err != nil {
-			manager.AddTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		_, err = tm.UpdateTask(taskID, manager.UpdateTaskRequest{
-			Priority: &priority,
-			DueDate:  &dueDate,
-		})
-		if err != nil {
-			manager.AddTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		manager.AddTaskCount.WithLabelValues("success").Inc()
-		manager.AddTaskDuration.Observe(time.Since(startTime).Seconds())
-		manager.TaskDescLength.Observe(float64(len(description)))
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-	})
-
-	r.Post("/tasks/toggle/{id}", func(w http.ResponseWriter, r *http.Request) {
-		startTime := time.Now()
-		idStr := chi.URLParam(r, "id")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			manager.UpdateTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
-			return
-		}
-		_, err = tm.ToggleComplete(id)
-		if err != nil {
-			manager.UpdateTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		manager.UpdateTaskCount.WithLabelValues("success").Inc()
-		manager.UpdateTaskDuration.Observe(time.Since(startTime).Seconds())
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-	})
-
-	r.Post("/tasks/update/{id}", func(w http.ResponseWriter, r *http.Request) {
-		startTime := time.Now()
-		idStr := chi.URLParam(r, "id")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			manager.UpdateTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
-			return
-		}
-		description := r.FormValue("description")
-		if description == "" {
-			manager.UpdateTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, "Описание задачи обязательно", http.StatusBadRequest)
-			return
-		}
-		priority := manager.Priority(r.FormValue("priority"))
-		dueDateStr := r.FormValue("due_date")
-		tagsStr := r.FormValue("tags")
-		var dueDate time.Time
-		if dueDateStr != "" {
-			dueDate, err = time.Parse("2006-01-02", dueDateStr)
-			if err != nil {
-				http.Error(w, "Некорректная дата выполнения", http.StatusBadRequest)
-				return
-			}
-		}
-		var tags []string
-		if tagsStr != "" {
-			tags = strings.Split(tagsStr, ",")
-			for i := range tags {
-				tags[i] = strings.TrimSpace(tags[i])
-			}
-		}
-		_, err = tm.UpdateTask(id, manager.UpdateTaskRequest{
-			Description: &description,
-			Priority:    &priority,
-			DueDate:     &dueDate,
-			Tags:        &tags,
-		})
-		if err != nil {
-			manager.UpdateTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		manager.UpdateTaskCount.WithLabelValues("success").Inc()
-		manager.UpdateTaskDuration.Observe(time.Since(startTime).Seconds())
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-	})
-
-	r.Post("/tasks/delete/{id}", func(w http.ResponseWriter, r *http.Request) {
-		startTime := time.Now()
-		idStr := chi.URLParam(r, "id")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			manager.DeleteTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
-			return
-		}
-		if err := tm.DeleteTask(id); err != nil {
-			manager.DeleteTaskCount.WithLabelValues("error").Inc()
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		manager.DeleteTaskCount.WithLabelValues("success").Inc()
-		manager.DeleteTaskDuration.Observe(time.Since(startTime).Seconds())
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-	})
-
-	r.Get("/tasks/filter/date", func(w http.ResponseWriter, r *http.Request) {
-    startStr := r.URL.Query().Get("start")
-    endStr := r.URL.Query().Get("end")
-    
-    // Парсим даты в российском формате ДД.ММ.ГГГГ
-    parseRussianDate := func(dateStr string) (time.Time, error) {
-        return time.Parse("02.01.2006", dateStr)
-    }
-    
-    start, err := parseRussianDate(startStr)
-    if err != nil {
-        http.Error(w, "Неверный формат начальной даты (используйте ДД.ММ.ГГГГ)", http.StatusBadRequest)
-        return
-    }
-    
-    end, err := parseRussianDate(endStr)
-    if err != nil {
-        http.Error(w, "Неверный формат конечной даты (используйте ДД.ММ.ГГГГ)", http.StatusBadRequest)
-        return
-    }
-
-    // Используем новый метод TaskManager
-    filteredTasks := tm.FilterByDateRange(start, end)
-    
-    tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
-    tmpl.Execute(w, TemplateData{Tasks: filteredTasks})
-})
-
-// Добавляем новые эндпоинты для подзадач
-	r.Get("/tasks/{taskID}/subtasks", func(w http.ResponseWriter, r *http.Request) {
-		taskIDStr := chi.URLParam(r, "taskID")
-		taskID, err := strconv.Atoi(taskIDStr)
-		if err != nil {
-			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
-			return
-		}
-		
-		subtasks := stm.GetSubTasks(taskID)
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(subtasks)
-	})
-	
-	r.Post("/tasks/{taskID}/subtasks", func(w http.ResponseWriter, r *http.Request) {
-		taskIDStr := chi.URLParam(r, "taskID")
-		taskID, err := strconv.Atoi(taskIDStr)
-		if err != nil {
-			http.Error(w, "Неверный ID задачи", http.StatusBadRequest)
-			return
-		}
-		
-		description := r.FormValue("description")
-		if description == "" {
-			http.Error(w, "Описание подзадачи обязательно", http.StatusBadRequest)
-			return
-		}
-		
-		id, err := stm.AddSubTask(taskID, description)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]int{"id": id})
-	})
-	
-	r.Post("/subtasks/{id}/toggle", func(w http.ResponseWriter, r *http.Request) {
-		idStr := chi.URLParam(r, "id")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			http.Error(w, "Неверный ID подзадачи", http.StatusBadRequest)
-			return
-		}
-		
-		if err := stm.ToggleSubTask(id); err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		
-		w.WriteHeader(http.StatusOK)
-	})
-	
-	r.Delete("/subtasks/{id}", func(w http.ResponseWriter, r *http.Request) {
-		idStr := chi.URLParam(r, "id")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			http.Error(w, "Неверный ID подзадачи", http.StatusBadRequest)
-			return
-		}
-		
-		if err := stm.DeleteSubTask(id); err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		
-		w.WriteHeader(http.StatusOK)
-	})
-
-	r.Get("/tasks/filter/advanced", func(w http.ResponseWriter, r *http.Request) {
-	// Парсим параметры запроса
-	query := r.URL.Query()
-	options := manager.FilterOptions{}
-	
-	// Статус выполнения
-	if completedStr := query.Get("completed"); completedStr != "" {
-		completed := completedStr == "true"
-		options.Completed = &completed
-	}
-	
-	// Приоритет
-	if priorityStr := query.Get("priority"); priorityStr != "" {
-		priority := manager.Priority(priorityStr)
-		if priority == manager.PriorityLow || priority == manager.PriorityMedium || priority == manager.PriorityHigh {
-			options.Priority = &priority
-		}
-	}
-	
-	// Теги (ИСПРАВЛЕНО - нормализация тегов)
-	if tagsStr := query.Get("tags"); tagsStr != "" {
-		rawTags := strings.Split(tagsStr, ",")
-		options.Tags = make([]string, 0)
-		for _, tag := range rawTags {
-			tag = strings.TrimSpace(tag)
-			if tag != "" {
-				options.Tags = append(options.Tags, tag)
-			}
-		}
-	}
-	
-	// Диапазон дат
-	if startStr := query.Get("start_date"); startStr != "" {
-		if start, err := time.Parse("02.01.2006", startStr); err == nil {
-			options.StartDate = &start
-		}
-	}
-	
-	if endStr := query.Get("end_date"); endStr != "" {
-		if end, err := time.Parse("02.01.2006", endStr); err == nil {
-			options.EndDate = &end
-		}
-	}
-	
-	// Флаг наличия due date
-	if hasDueDateStr := query.Get("has_due_date"); hasDueDateStr != "" {
-		hasDueDate := hasDueDateStr == "true"
-		options.HasDueDate = &hasDueDate
-	}
-	
-	filteredTasks := tm.FilterTasksAdvanced(options)
-	
-	tmpl := template.Must(template.New("index.html").Funcs(templateFuncs).ParseFiles("static/index.html"))
-	tmpl.Execute(w, TemplateData{Tasks: filteredTasks})
-})
 }
